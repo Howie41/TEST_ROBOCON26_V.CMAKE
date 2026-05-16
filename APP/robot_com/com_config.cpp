@@ -55,7 +55,7 @@ C620Motor chassis_motor3(&fdcan3_bus, 0x203, 0, 0x200, 0);
 C620Motor chassis_motor4(&fdcan3_bus, 0x204, 0, 0x200, 0);
 
 //
-DM4310Motor arm4310_motor(&fdcan2_bus, 0x301, 0, 0x01, 0,
+DM4310Motor arm4310_motor(&fdcan2_bus, 0x301, 0, 0x02, 0,
                          DM4310Motor::PosWithSpeed);
 
 // 串口外设（回调+信号量唤醒处理线程进行解包）
