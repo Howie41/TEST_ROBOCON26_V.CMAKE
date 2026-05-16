@@ -55,9 +55,7 @@ C620Motor chassis_motor3(&fdcan3_bus, 0x203, 0, 0x200, 0);
 C620Motor chassis_motor4(&fdcan3_bus, 0x204, 0, 0x200, 0);
 
 //
-C610Motor arm2006_motor(&fdcan2_bus, 0x205, 0, 0x1FF, 0);
-C620Motor arm3508_motor(&fdcan2_bus, 0x206, 0, 0x1FF, 0);
-DM4310Motor arm4310_motor(&fdcan2_bus, 0x301, 0, 0x01, 0,
+DM4310Motor arm4310_motor(&fdcan2_bus, 0x301, 0, 0x01 + 0x100, 0,
                          DM4310Motor::PosWithSpeed);
 
 // 串口外设（回调+信号量唤醒处理线程进行解包）
@@ -104,9 +102,9 @@ uint8_t comServiceInit() {
   chassis_motor3.init();
   chassis_motor4.init();
 
-  arm2006_motor.init();
-  arm3508_motor.init();
-  arm4310_motor.init();
+  // arm2006_motor.init();
+  // arm3508_motor.init();
+  // arm4310_motor.init();
 
   fdcan3_bus.registerDevice(&chassis_motor1);
   fdcan3_bus.registerDevice(&chassis_motor2);
@@ -114,8 +112,6 @@ uint8_t comServiceInit() {
   fdcan3_bus.registerDevice(&chassis_motor4);
 
 
-  fdcan2_bus.registerDevice(&arm2006_motor);
-  fdcan2_bus.registerDevice(&arm3508_motor);
   fdcan2_bus.registerDevice(&arm4310_motor);
 
   // 串口外设
@@ -161,19 +157,8 @@ void can2SendTask(void *argument) {
   pack.type = CanBus::Type::STANDARD;
 
   uint8_t len = 8;
-  const uint32_t arm_motor_ids[4] = {0x205, 0x206, 0x207, 0x208};
   for (;;) {
-    pack.id = 0x1FF; // DJI Group 2
-    // 当前仅有 0x201(arm2006) 和 0x203(arm3508)，其余槽位置 0
-    int16_t commands[4] = {0};
 
-    // arm motor
-    commands[0] = static_cast<int16_t>(arm2006_motor.cmdTrans()); // 0x201
-    commands[1] = static_cast<int16_t>(arm3508_motor.cmdTrans()); // 0x203
-    commands[2] = static_cast<int16_t>(0); // 0x203
-    commands[3] = static_cast<int16_t>(0); // 0x204
-    packDJIMotorCanMsg(pack.id, arm_motor_ids, commands, 4, pack.data, len);
-    // fdcan2_bus.addCanMsg(pack);
 
     vTaskDelayUntil(&currentTime, 1); // 每1ms执行一次发送任务
   }
