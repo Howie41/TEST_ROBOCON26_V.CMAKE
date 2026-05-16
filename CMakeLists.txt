@@ -88,7 +88,6 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
 target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined symbols
     # DEBUG_ARM
-    DM_MOTOR_SINGLE
 )
 
 # Remove wrong libob.a library dependency when using cpp files
