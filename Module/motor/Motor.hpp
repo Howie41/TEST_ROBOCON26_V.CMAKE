@@ -396,7 +396,7 @@ public:
    */
   enum ControlMode : uint8_t {
     Mit = 0x01,
-    PosWithSpeed = 0x02,
+    PosWithSpeed = 0x02, // 位置速度模式
     Speed = 0x03,
     Psi = 0x04,
   };
@@ -459,10 +459,11 @@ public:
     target_speed_ = speed;
     bool mode_Change = !modeChange(PosWithSpeed, mode_change_state_);
 #ifdef DM_MOTOR_SINGLE
-    if (!cs_changed || manager_ == nullptr || mode_Change) {
-#elif 
-    if (manager_ == nullptr || mode_Change) {
+    if (!cs_changed || manager_ == nullptr || mode_Change)
+#else
+    if (manager_ == nullptr || mode_Change)
 #endif
+    {
       return;
     }
 
@@ -486,9 +487,9 @@ public:
     target_speed_ = speed;
     bool mode_Change = !modeChange(Speed, mode_change_state_);
 #ifdef DM_MOTOR_SINGLE
-    if (!cs_changed || manager_ == nullptr || mode_Change) {
-#elif 
-    if (manager_ == nullptr || mode_Change) {
+  if (!cs_changed || manager_ == nullptr || mode_Change) {
+#else
+  if (manager_ == nullptr || mode_Change) {
 #endif
       return;
     }
@@ -521,9 +522,9 @@ public:
     target_kd_ = Kd;
     bool mode_Change = !modeChange(Mit, mode_change_state_);
 #ifdef DM_MOTOR_SINGLE
-    if (!cs_changed || manager_ == nullptr || mode_Change) {
-#elif 
-    if (manager_ == nullptr || mode_Change) {
+  if (!cs_changed || manager_ == nullptr || mode_Change) {
+#else
+  if (manager_ == nullptr || mode_Change) {
 #endif
       return;
     }
@@ -552,9 +553,9 @@ public:
     target_current_ = current;
     bool mode_Change = !modeChange(Psi, mode_change_state_);
 #ifdef DM_MOTOR_SINGLE
-    if (!cs_changed || manager_ == nullptr || mode_Change) {
-#elif 
-    if (manager_ == nullptr || mode_Change) {
+  if (!cs_changed || manager_ == nullptr || mode_Change) {
+#else
+  if (manager_ == nullptr || mode_Change) {
 #endif
       return;
     }
