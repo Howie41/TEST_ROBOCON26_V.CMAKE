@@ -16,6 +16,7 @@
 #pragma once
 #include "fdcan.h"
 #include "usart.h"
+#include <cstdint>
 #include <stdbool.h>
 
 #pragma pack(1)
@@ -56,5 +57,11 @@ typedef struct {
   float linear_y_;
   float omega_;
 } pub_chassis_cmd;
+
+typedef struct {
+  uint8_t address1;
+  uint8_t address2;
+  uint8_t data;
+} pub_infrared_msg;
 
 #pragma pack()
