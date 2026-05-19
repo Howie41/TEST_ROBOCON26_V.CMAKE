@@ -32,7 +32,7 @@
 
 osThreadId_t Debug_TaskHandle;
 
-extern DM4310Motor arm4310_motor;
+extern DM43xxMotor arm4310_motor;
 float arm4310_pos = 0.0f;
 float arm4310_speed = 0.0f;
 bool change = 0;

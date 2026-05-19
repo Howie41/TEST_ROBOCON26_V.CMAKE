@@ -13,6 +13,8 @@
  */
 
 #include "UartPort.hpp"
+#include "com_config.h"
+#include "stm32h7xx_hal_def.h"
 
 #include <cstring>
 
@@ -48,7 +50,9 @@ HAL_StatusTypeDef UartPort::startRxDmaIdle() {
     return HAL_ERROR;
   }
   last_rx_pos_ = 0;
-  return HAL_UARTEx_ReceiveToIdle_DMA(huart_, rx_dma_buf_, rx_dma_buf_size_);
+  HAL_StatusTypeDef status = HAL_UARTEx_ReceiveToIdle_DMA(huart_, rx_dma_buf_, rx_dma_buf_size_);
+  
+  return status;
 }
 
 HAL_StatusTypeDef UartPort::write(const uint8_t *data, size_t len,
@@ -226,7 +230,7 @@ UartPort *UartPort::fromHandle(UART_HandleTypeDef *huart) {
 }
 
 extern "C" void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart,
-                                           uint16_t) {
+                                           uint16_t Size) {
   UartPort *port = UartPort::fromHandle(huart);
   if (port != nullptr) {
     port->onRxEvent();

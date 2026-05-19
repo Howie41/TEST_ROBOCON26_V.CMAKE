@@ -15,11 +15,15 @@
 #include "FreeRTOS.h"
 #include "cmsis_os2.h"
 #include "portmacro.h"
+#include "stm32h7xx_hal_dma.h"
 #include "stm32h7xx_hal_uart.h"
 #include "task.h"
 
+#include "memory_map.h"
+
 #include "Canbus.hpp"
 #include "Hwt101.hpp"
+#include "infrared_com.hpp"
 #include "Motor.hpp"
 #include "ROSCom.hpp"
 #include "UartPort.hpp"
@@ -60,17 +64,20 @@ C620Motor chassis_motor4(&fdcan3_bus, 0x204, 0, 0x200, 0);
 //
 C610Motor arm2006_motor(&fdcan2_bus, 0x205, 0, 0x1FF, 0);
 C620Motor arm3508_motor(&fdcan2_bus, 0x206, 0, 0x1FF, 0);
-DM4310Motor arm4310_motor(&fdcan2_bus, 0x301, 0, 0x01, 0,
-                         DM4310Motor::PosWithSpeed);
+DM43xxMotor arm4310_motor(&fdcan2_bus, 0x301, 0, 0x01, 0,
+                         DM43xxMotor::PosWithSpeed);
 
 // 串口外设（回调+信号量唤醒处理线程进行解包）
 void onUart3RxCb(const uint8_t *data, size_t len, void *user);
 void onUart2RxCb(const uint8_t *data, size_t len, void *user);
+void onUart6RxCb(const uint8_t *data, size_t len, void *user);
 
 void onUsbRxCb(const uint8_t *data, size_t len, void *user);
 
 extern UART_HandleTypeDef huart3;
 extern UART_HandleTypeDef huart2;
+extern UART_HandleTypeDef huart6;
+extern DMA_HandleTypeDef hdma_usart6_rx;
 
 DMA_BUFFER_ATTR static uint8_t uart3_rx_dma[64];
 DMA_BUFFER_ATTR static uint8_t uart3_tx_dma[64];
@@ -83,6 +90,12 @@ DMA_BUFFER_ATTR static uint8_t uart2_tx_dma[64];
 UartPort uart2_port(&huart2, uart2_rx_dma, sizeof(uart2_rx_dma), uart2_tx_dma,
                     sizeof(uart2_tx_dma), onUart2RxCb, nullptr);
 osSemaphoreId_t uart2_rx_semphore = NULL;
+
+ // USART6 红外模块
+DMA_BUFFER_ATTR static uint8_t uart6_rx_dma[UartPort::kPacketPayloadSize] = {0};
+DMA_BUFFER_ATTR static uint8_t uart6_tx_dma[64] = {0};
+UartPort uart6_port(&huart6, uart6_rx_dma, sizeof(uart6_rx_dma),
+                            uart6_tx_dma, sizeof(uart6_tx_dma), onUart6RxCb, nullptr);
 
 // Xbox控制器（基于uart3）
 XboxRemote xbox_remote(uart3_port);
@@ -98,6 +111,8 @@ Hwt101Parser hwt101_parser;
 
 // 导航协议解析器
 NavProtocol nav_protocol;
+// 红外通信
+InfraredModule infrared_module(uart6_port);
 
 // usb
 osSemaphoreId_t usbcdc_rx_semphore = NULL;
@@ -144,6 +159,7 @@ uint8_t comServiceInit() {
   uart2_port.startRxDmaIdle();
   uart3_rx_semphore = osSemaphoreNew(1, 0, NULL);
   uart3_port.startRxDmaIdle();
+  uart6_port.startRxDmaIdle();
  
   // Xbox控制器初始化
   xbox_remote.init();
@@ -168,6 +184,12 @@ void onUart3RxCb(const uint8_t *data, size_t len, void *user) {
   if (data != nullptr && len > 0 && uart3_rx_semphore != NULL) {
     (void)osSemaphoreRelease(uart3_rx_semphore);
   }
+}
+
+// 红外模块回调
+void onUart6RxCb(const uint8_t *data, size_t len, void *user) {
+  (void)user;
+  infrared_module.UartPortRxCbHandler(data, len);
 }
 
 void onUsbRxCb(const uint8_t *data, size_t len, void *user) {
