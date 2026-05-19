@@ -21,7 +21,7 @@ class InfraredModule {
     public:
         static constexpr uint16_t BUFFER_SIZE = 4;
         static constexpr uint32_t TX_MAX_TIMEOUT = 1000;
-        static constexpr const char *infrared_msg_topic = "infrared_msg_";
+        static constexpr const char *INFRARED_MSG_TOPIC = "infrared_msg";
 
         enum class state {
             NOT_INITIALIZED,        // 未初始化
@@ -50,14 +50,14 @@ class InfraredModule {
          */
         void rxEventCallbackHandler(UART_HandleTypeDef *event_huart, uint16_t event_size) {
             if (event_huart->Instance == hal_huart_.Instance) {
-                if (current_state_.load(std::memory_order_acquire) == state::READY_TO_RECEIVE_DATA) {
+                if (current_state_.load() == state::READY_TO_RECEIVE_DATA) {
                     // 把接收到的数据发送出去
                     infrared_msg_.address1 = rx_buffer_[0];
                     infrared_msg_.address2 = rx_buffer_[1];
                     infrared_msg_.data = rx_buffer_[2];
                     infrared_pub_.Publish(infrared_msg_);
 
-                } else if (current_state_.load(std::memory_order_acquire) == state::AWAITING_FOR_ACK) {
+                } else if (current_state_.load() == state::AWAITING_FOR_ACK) {
                     // 处理接收到的ACK数据
                     if (rx_buffer_[0] == ACK_CODE) {
                         changeStateTo(state::ACK_SUCCESS);
@@ -97,10 +97,10 @@ class InfraredModule {
             while (osKernelGetTickCount() - start_time < timeout) {
                 // 此时状态是 AWAITING_FOR_ACK，此时状态由 rxEventCallbackHandler 接管
 
-                if (current_state_.load(std::memory_order_acquire) == state::ACK_SUCCESS) {
+                if (current_state_.load() == state::ACK_SUCCESS) {
                     changeStateTo(state::READY_TO_RECEIVE_DATA);
                     return HAL_OK;
-                } else if (current_state_.load(std::memory_order_acquire) == state::ACK_ERROR) {
+                } else if (current_state_.load() == state::ACK_ERROR) {
                     changeStateTo(state::READY_TO_RECEIVE_DATA);
                     return HAL_ERROR;
                 }
@@ -121,7 +121,7 @@ class InfraredModule {
 
         uint8_t rx_buffer_[BUFFER_SIZE] = {0};
 
-        TypedTopicPublisher<pub_infrared_msg> infrared_pub_{infrared_msg_topic};
+        TypedTopicPublisher<pub_infrared_msg> infrared_pub_{INFRARED_MSG_TOPIC};
         pub_infrared_msg infrared_msg_{};
 
         HAL_StatusTypeDef beginDMAReceive(uint16_t size) {
@@ -172,7 +172,7 @@ class InfraredModule {
                     break;
 
             }
-            current_state_.store(new_state, std::memory_order_release);
+            current_state_.store(new_state);
         }
 
 };

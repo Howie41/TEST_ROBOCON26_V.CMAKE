@@ -41,5 +41,6 @@ void usbCdcProcessTask(void *argument);
 #endif
 
 #ifdef __cplusplus
-
+#include "infrared_com.hpp"
+extern InfraredModule infrared_module;
 #endif

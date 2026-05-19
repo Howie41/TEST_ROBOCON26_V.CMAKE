@@ -13,6 +13,7 @@
  */
 
 #include "UartPort.hpp"
+#include "com_config.h"
 
 #include <cstring>
 
@@ -226,11 +227,19 @@ UartPort *UartPort::fromHandle(UART_HandleTypeDef *huart) {
 }
 
 extern "C" void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart,
-                                           uint16_t) {
+                                           uint16_t Size) {
   UartPort *port = UartPort::fromHandle(huart);
   if (port != nullptr) {
     port->onRxEvent();
   }
+
+  /**
+   * @author Howie41
+   * 写红外模块的时候直接用了HAL库的函数
+   * 不得不改动这里的文件
+   * 如果后续有更好的解决方法，我再来适配UartPort的接口
+   */
+  infrared_module.rxEventCallbackHandler(huart, Size);
 }
 
 extern "C" void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart) {

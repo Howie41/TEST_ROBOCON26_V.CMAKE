@@ -15,11 +15,13 @@
 #include "FreeRTOS.h"
 #include "cmsis_os2.h"
 #include "portmacro.h"
+#include "stm32h7xx_hal_dma.h"
 #include "stm32h7xx_hal_uart.h"
 #include "task.h"
 
 #include "Canbus.hpp"
 #include "Hwt101.hpp"
+#include "infrared_com.hpp"
 #include "Motor.hpp"
 #include "ROSCom.hpp"
 #include "UartPort.hpp"
@@ -70,6 +72,8 @@ void onUsbRxCb(const uint8_t *data, size_t len, void *user);
 
 extern UART_HandleTypeDef huart3;
 extern UART_HandleTypeDef huart2;
+extern UART_HandleTypeDef huart6;
+extern DMA_HandleTypeDef hdma_usart6_rx;
 
 DMA_BUFFER_ATTR static uint8_t uart3_rx_dma[64];
 DMA_BUFFER_ATTR static uint8_t uart3_tx_dma[64];
@@ -94,6 +98,9 @@ volatile float g_hwt101_yaw_deg = 0.0f;
 //同样 需要roll和pitch再开启
 volatile uint32_t g_hwt101_frame_count = 0;
 Hwt101Parser hwt101_parser;
+
+// 红外通信
+InfraredModule infrared_module(huart6, hdma_usart6_rx);
 
 // usb
 osSemaphoreId_t usbcdc_rx_semphore = NULL;
