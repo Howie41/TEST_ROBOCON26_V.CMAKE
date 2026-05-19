@@ -25,6 +25,7 @@
 #include "UartPort.hpp"
 #include "UsbPort.hpp"
 #include "XboxRemote.hpp"
+#include "NavProtocol.hpp"
 #include "topics.hpp"
 #include "topic_pool.h"
 #include "usart.h"
@@ -94,6 +95,9 @@ volatile float g_hwt101_yaw_deg = 0.0f;
 //同样 需要roll和pitch再开启
 volatile uint32_t g_hwt101_frame_count = 0;
 Hwt101Parser hwt101_parser;
+
+// 导航协议解析器
+NavProtocol nav_protocol;
 
 // usb
 osSemaphoreId_t usbcdc_rx_semphore = NULL;
@@ -272,8 +276,14 @@ void uart3RxProcessTask(void *argument) {
           const auto &ctrl_data = xbox_remote.getControllerData();
           xbox_msg.btnY = ctrl_data.btnY;
           xbox_msg.btnA = ctrl_data.btnA;
+          xbox_msg.btnShare = ctrl_data.btnShare;
+          xbox_msg.btnView = ctrl_data.btnSelect;
+          xbox_msg.btnMenu = ctrl_data.btnStart;
+          xbox_msg.btnXbox = ctrl_data.btnXbox;
           xbox_msg.btnLB = ctrl_data.btnLB;
           xbox_msg.btnRB = ctrl_data.btnRB;
+          xbox_msg.btnLS = ctrl_data.btnLS;
+          xbox_msg.btnRS = ctrl_data.btnRS;
           xbox_msg.trigLT = ctrl_data.trigLT;
           xbox_msg.trigRT = ctrl_data.trigRT;
           xbox_msg.btnDirUp = ctrl_data.btnDirUp;
@@ -296,28 +306,54 @@ void uart3RxProcessTask(void *argument) {
 
 
 void usbCdcProcessTask(void *argument) {
+    (void)argument;
 
-  (void)argument;
+    for (;;) {
+        (void)osSemaphoreAcquire(usbcdc_rx_semphore, osWaitForever);
 
-  for (;;) {
-    (void)osSemaphoreAcquire(usbcdc_rx_semphore, osWaitForever);
-
-    UsbPort::Packet packet{};
-    while (UsbPort::Instance().Read(packet)) {
-      // 逐个字节解析
-      for (uint16_t i = 0; i < packet.len; ++i) {
-        uint8_t frame_id = ros_protocol.processData(packet.data[i]);
-        if (frame_id != 0) {
-          uint8_t rev[64] = {0};
-          memcpy(rev, ros_protocol.getSensorBagData().i16_data,
-                 sizeof(ros_protocol.getSensorBagData().i16_data));
-          memcpy(rev + sizeof(ros_protocol.getSensorBagData().i16_data),
-                 ros_protocol.getSensorBagData().f_data,
-                 sizeof(ros_protocol.getSensorBagData().f_data));
-          UsbPort::Instance().WriteAsync(
-              rev, sizeof(ros_protocol.getSensorBagData()));
+        UsbPort::Packet packet{};
+        while (UsbPort::Instance().Read(packet)) {
+            // 逐个字节解析
+            for (uint16_t i = 0; i < packet.len; ++i) {
+                NavProtocol::NavCmd cmd;
+                if (nav_protocol.processByte(packet.data[i], cmd)) {
+                    // 解析成功，生成响应
+                    char resp[64] = {0};
+                    NavProtocol::buildResponse(cmd, resp, sizeof(resp));
+                    // 通过USB发送响应
+                    UsbPort::Instance().WriteAsync(reinterpret_cast<uint8_t*>(resp), strlen(resp));
+                }
+            }
         }
-      }
     }
-  }
 }
+
+/*
+// ============ 原来的ROSProtocol方式（保留备用） ============
+void usbCdcProcessTask_Origin(void *argument) {
+
+    (void)argument;
+
+    for (;;) {
+        (void)osSemaphoreAcquire(usbcdc_rx_semphore, osWaitForever);
+
+        UsbPort::Packet packet{};
+        while (UsbPort::Instance().Read(packet)) {
+            for (uint16_t i = 0; i < packet.len; ++i) {
+                uint8_t frame_id = ros_protocol.processData(packet.data[i]);
+                if (frame_id != 0) {
+                    uint8_t rev[64] = {0};
+                    memcpy(rev, ros_protocol.getSensorBagData().i16_data,
+                           sizeof(ros_protocol.getSensorBagData().i16_data));
+                    memcpy(rev + sizeof(ros_protocol.getSensorBagData().i16_data),
+                           ros_protocol.getSensorBagData().f_data,
+                           sizeof(ros_protocol.getSensorBagData().f_data));
+                    UsbPort::Instance().WriteAsync(
+                        rev, sizeof(ros_protocol.getSensorBagData()));
+                }
+            }
+        }
+    }
+}
+// ============ 原来的ROSProtocol方式结束 ============
+*/

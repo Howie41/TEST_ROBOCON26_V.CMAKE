@@ -24,6 +24,7 @@
 #include "com_config.h"
 #include "control_task.h"
 #include "debug_task.h"
+#include "NavProtocol.hpp"
 
 /* module层接口头文件 */
 
@@ -37,7 +38,6 @@ extern osThreadId_t Debug_TaskHandle;
 extern osThreadId_t ChassisTaskHandle;
 extern osThreadId_t ControlTaskHandle;
 extern osThreadId_t usbcdcProcessTaskHandle;
-
 
 
 
@@ -112,4 +112,12 @@ void osTaskInit(void) {
   };
   usbcdcProcessTaskHandle =
       osThreadNew(usbCdcProcessTask, NULL, &UsbcdcProcessTaskHandle_attributes);
+//用于定位
+  const osThreadAttr_t NavControlTaskHandle_attributes = {
+      .name = "NavControl_TaskHandle",
+      .stack_size = 512 * 4,
+      .priority = (osPriority_t)osPriorityNormal,
+  };
+  NavControlTaskHandle =
+      osThreadNew(NavControlTask, NULL, &NavControlTaskHandle_attributes);
 }

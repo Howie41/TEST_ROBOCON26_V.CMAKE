@@ -29,8 +29,14 @@ typedef struct {
 typedef struct {
   bool btnY;
   bool btnA;
+  bool btnShare;
+  bool btnView;
+  bool btnMenu;
+  bool btnXbox;
   bool btnLB;
   bool btnRB;
+  bool btnLS;
+  bool btnRS;
   uint16_t trigLT;
   uint16_t trigRT;
   bool btnDirUp;
@@ -55,6 +61,7 @@ typedef struct {
   float linear_x_;
   float linear_y_;
   float omega_;
+  bool nav_mode_;
 } pub_chassis_cmd;
 
 #pragma pack()

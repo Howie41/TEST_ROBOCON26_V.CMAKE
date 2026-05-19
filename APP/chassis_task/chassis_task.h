@@ -21,3 +21,14 @@
 #include "topics.hpp"
 
 void chassisTask(void *argument);
+
+namespace chassis_action {
+
+void requestYawRotateDeg(float delta_deg);
+void requestYawRotateCcw90();
+void requestYawRotateCw90();
+bool yawRotateActive();
+bool takeYawRotateFinished();
+float yawRotateTargetDeg();
+
+}  // namespace chassis_action

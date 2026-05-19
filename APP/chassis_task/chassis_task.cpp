@@ -45,6 +45,65 @@ volatile float g_chassis_target_rpm_rr = 0.0f;
 
 namespace {
 
+float normalizeDeg(float angle_deg);
+void refreshYawReference();
+
+}  // namespace
+
+namespace chassis_action {
+
+constexpr float kYawRotate90Deg = 90.0f;
+constexpr float kYawRotateToleranceDeg = 2.0f;
+
+bool g_yaw_rotate_active = false;
+bool g_yaw_rotate_finished = false;
+float g_yaw_rotate_target_deg = 0.0f;
+PID_t g_yaw_rotate_pid = {
+    .Kp = 0.16f,
+    .Ki = 0.0008f,
+    .Kd = 0.001f,
+    .MaxOut = 1.5f,
+    .IntegralLimit = 0.35f,
+    .DeadBand = 0.3f,
+    .Improve = Integral_Limit,
+};
+
+void requestYawRotateDeg(float delta_deg) {
+  refreshYawReference();
+  g_yaw_rotate_target_deg = normalizeDeg(g_chassis_yaw_deg + delta_deg);
+  g_yaw_rotate_active = true;
+  g_yaw_rotate_finished = false;
+  g_chassis_yaw_lock_deg = g_yaw_rotate_target_deg;
+  g_chassis_yaw_hold_omega = 0.0f;
+  PID_Init(&g_yaw_rotate_pid);
+}
+
+void requestYawRotateCcw90() {
+  requestYawRotateDeg(kYawRotate90Deg);
+}
+
+void requestYawRotateCw90() {
+  requestYawRotateDeg(-kYawRotate90Deg);
+}
+
+bool yawRotateActive() {
+  return g_yaw_rotate_active;
+}
+
+bool takeYawRotateFinished() {
+  const bool finished = g_yaw_rotate_finished;
+  g_yaw_rotate_finished = false;
+  return finished;
+}
+
+float yawRotateTargetDeg() {
+  return g_yaw_rotate_target_deg;
+}
+
+}  // namespace chassis_action
+
+namespace {
+
 Omni45Chassis chassis_solver(chassis_motor1, chassis_motor2, chassis_motor3,
                              chassis_motor4);
 
@@ -96,11 +155,32 @@ void refreshYawReference() {
   g_chassis_yaw_deg = currentRelativeYawDeg();
 }
 
+bool updateYawRotateControl(pub_chassis_cmd &final_cmd) {
+  if (!chassis_action::yawRotateActive()) {
+    return false;
+  }
+
+  const float yaw_error =
+      normalizeDeg(chassis_action::yawRotateTargetDeg() - g_chassis_yaw_deg);
+  final_cmd.linear_x_ = 0.0f;
+  final_cmd.linear_y_ = 0.0f;
+  final_cmd.omega_ =
+      PID_Calculate(&chassis_action::g_yaw_rotate_pid, 0.0f, yaw_error);
+
+  if (std::fabs(yaw_error) <= chassis_action::kYawRotateToleranceDeg) {
+    final_cmd.omega_ = 0.0f;
+    chassis_action::g_yaw_rotate_active = false;
+    chassis_action::g_yaw_rotate_finished = true;
+  }
+  return true;
+}
+
 } // namespace
 
 static inline void chassisInit() {
   chassis_solver.configureSpeedPid(kWheelPidParams);
   PID_Init(&yaw_hold_pid);
+  PID_Init(&chassis_action::g_yaw_rotate_pid);
 }
 
 void chassisTask(void *argument) {
@@ -119,18 +199,38 @@ void chassisTask(void *argument) {
     refreshYawReference();
 
     pub_chassis_cmd final_cmd = chassis_cmd;
-    const bool operator_rotating = std::fabs(chassis_cmd.omega_) > 0.05f;
-    if (operator_rotating) {
-      g_chassis_yaw_lock_deg = g_chassis_yaw_deg;
-      g_chassis_yaw_hold_omega = 0.0f;
-      PID_Reset(&yaw_hold_pid);
-    } else {
-      const float yaw_error =
-          normalizeDeg(g_chassis_yaw_lock_deg - g_chassis_yaw_deg);
-      g_chassis_yaw_hold_omega =
-          PID_Calculate(&yaw_hold_pid, 0.0f, yaw_error);
-      final_cmd.omega_ = g_chassis_yaw_hold_omega;
+
+    if (updateYawRotateControl(final_cmd)) {
+      g_chassis_final_omega = final_cmd.omega_;
+      chassis_solver.run(final_cmd);
+
+      const auto &target_rpm = chassis_solver.targetRpm();
+      g_chassis_target_rpm_fl = target_rpm[0];
+      g_chassis_target_rpm_fr = target_rpm[1];
+      g_chassis_target_rpm_rl = target_rpm[2];
+      g_chassis_target_rpm_rr = target_rpm[3];
+
+      vTaskDelayUntil(&currentTime, 5);
+      continue;
     }
+    
+    // 只有在手动模式（nav_mode_=false）时才执行锁头逻辑
+    // 自动导航模式下，由导航任务控制omega，不启用锁头
+    if (!chassis_cmd.nav_mode_) {
+      const bool operator_rotating = std::fabs(chassis_cmd.omega_) > 0.05f;
+      if (operator_rotating) {
+        g_chassis_yaw_lock_deg = g_chassis_yaw_deg;
+        g_chassis_yaw_hold_omega = 0.0f;
+        PID_Reset(&yaw_hold_pid);
+      } else {
+        const float yaw_error =
+            normalizeDeg(g_chassis_yaw_lock_deg - g_chassis_yaw_deg);
+        g_chassis_yaw_hold_omega =
+            PID_Calculate(&yaw_hold_pid, 0.0f, yaw_error);
+        final_cmd.omega_ = g_chassis_yaw_hold_omega;
+      }
+    }
+    // 自动模式：omega_ 保持 chassis_cmd.omega_（导航计算的）
 
     g_chassis_final_omega = final_cmd.omega_;
     chassis_solver.run(final_cmd);

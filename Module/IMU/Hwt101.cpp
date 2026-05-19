@@ -1,4 +1,4 @@
-/*
+/** 
  * @file Hwt101.cpp
  * @author YE
  * @brief HWT101 IMU传感器驱动源文件

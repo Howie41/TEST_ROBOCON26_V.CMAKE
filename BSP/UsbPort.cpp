@@ -121,8 +121,17 @@ void UsbPort::OnRxFromIsr(const uint8_t *data, size_t len) {
   }
 }
 
-// 发送完成中断
-void UsbPort::OnTxCpltFromIsr() { tx_inflight_ = false; }
+void UsbPort::OnTxCpltFromIsr() { 
+  tx_inflight_ = false; 
+  PumpTx(); 
+}
+
+/*  
+// 原来的代码（有bug：发送完成后不继续发送）
+void UsbPort::OnTxCpltFromIsr_Origin() { 
+  tx_inflight_ = false; 
+}
+*/
 
 extern "C" void UsbPort_OnRxFromIsr(const uint8_t *data, uint32_t len) {
   UsbPort::Instance().OnRxFromIsr(data, len);
