@@ -23,7 +23,11 @@ class Logger {
             int len = vsnprintf(buffer, sizeof(buffer), format, args);
             va_end(args);
             if (len > 0) {
-                uart_.writeDma(reinterpret_cast<const uint8_t *>(buffer), static_cast<size_t>(len));
+                size_t write_len = static_cast<size_t>(len);
+                if (write_len >= sizeof(buffer)) {
+                    write_len = sizeof(buffer) - 1;
+                }
+                uart_.writeDma(reinterpret_cast<const uint8_t *>(buffer), write_len);
             }
         }
 
@@ -34,7 +38,11 @@ class Logger {
             int len = vsnprintf(buffer, sizeof(buffer), format, args);
             va_end(args);
             if (len > 0 && priority >= current_priority_) {
-                uart_.writeDma(reinterpret_cast<const uint8_t *>(buffer), static_cast<size_t>(len));
+                size_t write_len = static_cast<size_t>(len);
+                if (write_len >= sizeof(buffer)) {
+                    write_len = sizeof(buffer) - 1;
+                }
+                uart_.writeDma(reinterpret_cast<const uint8_t *>(buffer), write_len);
             }
         }
 
