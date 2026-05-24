@@ -24,6 +24,7 @@
 #include "com_config.h"
 #include "control_task.h"
 #include "debug_task.h"
+#include "state_machine_task.h"
 #include "NavProtocol.hpp"
 #include "lift_task.h"
 #include "tail_claw_task.hpp"
@@ -151,4 +152,12 @@ void osTaskInit(void) {
   };
   PcComTaskHandle =
       osThreadNew(PcComTask, NULL, &PcComTaskHandle_attributes);
+  // 自动状态机
+  const osThreadAttr_t StateMachineTaskHandle_attributes = {
+      .name = "StateMachine_TaskHandle",
+      .stack_size = 512 * 4,
+      .priority = (osPriority_t)osPriorityNormal,
+  };
+  StateMachineTaskHandle =
+      osThreadNew(stateMachineTask, NULL, &StateMachineTaskHandle_attributes);
 }
