@@ -22,6 +22,7 @@ public:
     void setTarget(const Pose2D& pose);   //目标位置和姿态
     bool arrived() const;                 //是否到达目标位置
     void stop();                           //停止
+    bool blocked();                        //是否被阻挡
 
 private:
     Pose2D target_{0.0f, 0.0f, 0.0f};

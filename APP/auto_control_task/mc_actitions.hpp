@@ -1,7 +1,8 @@
 #pragma once
 
-#include "r2_bt_core.hpp"
-#include "r2_drivers.hpp"
+#include "bt_core.hpp"
+#include "driver.hpp"
+#include <cstdint>
 
 // =========================
 //将武馆的具体动作实现写在这个文件中，动作的接口定义在driver.hpp中，
@@ -18,7 +19,7 @@ public:
     void reset();                    //重置计时器，清除开始时间和状态
     bool started() const;            //计时器是否开始  
     bool timeout(uint32_t now_ms, uint32_t duration_ms) const;       //计时器是否超时
-
+ 
 private:
     uint32_t start_ms_ = 0;
     bool started_ = false;
@@ -37,7 +38,8 @@ public:
     void reset() override;                             //重置状态
 
 private:
-    Chassis& chassis_;                  
+    Chassis& chassis_;
+    TickTimer timer_;                  
 };
 
 //这是移动到组装位置的节点---组装和支架是分开的，因为组装位置可能需要更精确的控制，而支架位置可能只需要粗略的移动
@@ -110,7 +112,7 @@ public:
 
 private:
     enum class Step {
-        R2haveready;          //R2准备就绪，等待R1准备就绪     
+        R2haveready,          //R2准备就绪，等待R1准备就绪     
         MoveToAssemblePose,   //移动到组装位置
         FineAlign,           //微调
         InsertHead,           //插入头

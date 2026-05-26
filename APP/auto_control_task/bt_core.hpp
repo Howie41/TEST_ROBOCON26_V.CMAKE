@@ -91,11 +91,11 @@ class Selector : public BTNode
 public: 
     Selector(BTNode **children, std::size_t num_children): children_(children), 
                                                         num_children_(num_children) 
-                                                        current_index_(0) {}
+                                                       {}
     virtual BT_Status tick() 
     {
         for(std::size_t i = current_index_; i < num_children_; ++i){
-            if(*children_[i] == nullptr){
+            if(children_[i] == nullptr){
                 reset(); //如果子节点为空，重置状态并返回失败
                 return BT_Status::FAILURE;
             }
@@ -147,7 +147,7 @@ public:
         bool all_success = true;                      //标记是否所有子节点都成功
         
         for(std::size_t i = 0; i < num_children_; ++i){
-            if(*children_[i] == nullptr){
+            if(children_[i] == nullptr){
                 reset(); //如果子节点为空，重置状态并返回失败
                 return BT_Status::FAILURE;
             }

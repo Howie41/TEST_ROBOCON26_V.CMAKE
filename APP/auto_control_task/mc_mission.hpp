@@ -15,14 +15,14 @@ enum class R2MCState {
     MOVE_TO_ASSEMBLE,   //移动到组装位置
     ASSEMBLE_WEAPON,    //装配武器
     WAIT_R1_LEAVE,      //等待 R1 离开武馆
-    EXIT_MC             //离开武馆
-    Error               //错误状态，进入这个状态后需要人工干预
+    EXIT_MC,             //离开武馆
+    Error,               //错误状态，进入这个状态后需要人工干预
     Done                //完成状态，任务完成后进入这个状态
 };
 
 class GET_HEAD : public BTNode {
 public:
-    GET_HEAD(Chassis& chassis, Gripper& gripper, Vision& vision):
+    GET_HEAD(Chassis& chassis, Gripper& gripper, Vision& vision);
      BT_Status tick() override;
      void reset() override;
 private:
