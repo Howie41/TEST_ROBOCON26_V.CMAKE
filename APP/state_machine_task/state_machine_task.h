@@ -12,6 +12,9 @@ extern osThreadId_t StateMachineTaskHandle;
 
 void stateMachineTask(void *argument);
 
+// SpearheadRack - SHR 端头架
+// StaffRack - SR 长杆架
 enum class RobotState {
-
+    READY,
+    MOVE_TO_SHR,
 };

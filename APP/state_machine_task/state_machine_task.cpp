@@ -6,10 +6,13 @@
  */
 
 #include "state_machine_task.h"
+#include <atomic>
 osThreadId_t StateMachineTaskHandle;
 
+
+
 void stateMachineTask(void *argument) {
-  for (;;) {
-    
-  }
+    for (;;) {
+        osDelay(1);
+    }
 }
