@@ -65,8 +65,18 @@ C620Motor chassis_motor4(&fdcan3_bus, 0x204, 0, 0x200, 0);
 //
 C610Motor arm2006_motor(&fdcan2_bus, 0x205, 0, 0x1FF, 0);
 C620Motor arm3508_motor(&fdcan2_bus, 0x206, 0, 0x1FF, 0);
-DM43xxMotor arm4310_motor(&fdcan2_bus, 0x301, 0, 0x01, 0,
-                         DM43xxMotor::PosWithSpeed);
+//DM43xxMotor arm4310_motor(&fdcan2_bus, 0x301, 0, 0x01, 0,DM43xxMotor::PosWithSpeed);
+
+//抬升电机
+C610Motor lift_2006_motor1(&fdcan1_bus, 0x201, 0, 0x200, 0);
+C610Motor lift_2006_motor2(&fdcan1_bus, 0x202, 0, 0x200, 0);
+C620Motor lift_3508_motor1(&fdcan1_bus, 0x203, 0, 0x200, 0);
+C620Motor lift_3508_motor2(&fdcan1_bus, 0x204, 0, 0x200, 0);
+
+//尾部的电机
+C610Motor tail_claw_move_motor(&fdcan2_bus, 0x201, 0, 0x200, 0);
+C620Motor tail_claw_roll_motor(&fdcan2_bus, 0x202, 0, 0x200, 0);
+
 
 // 串口外设（回调+信号量唤醒处理线程进行解包）
 void onUart3RxCb(const uint8_t *data, size_t len, void *user);
@@ -151,7 +161,15 @@ uint8_t comServiceInit() {
 
   arm2006_motor.init();
   arm3508_motor.init();
-  arm4310_motor.init();
+  //arm4310_motor.init();
+//尾部电机的初始化
+  tail_claw_move_motor.init();
+  tail_claw_roll_motor.init();
+
+  lift_2006_motor1.init();
+  lift_2006_motor2.init();
+  lift_3508_motor1.init();
+  lift_3508_motor2.init();
 
   fdcan3_bus.registerDevice(&chassis_motor1);
   fdcan3_bus.registerDevice(&chassis_motor2);
@@ -161,7 +179,16 @@ uint8_t comServiceInit() {
 
   fdcan2_bus.registerDevice(&arm2006_motor);
   fdcan2_bus.registerDevice(&arm3508_motor);
-  fdcan2_bus.registerDevice(&arm4310_motor);
+  //fdcan2_bus.registerDevice(&arm4310_motor);
+  //注册尾部电机
+  fdcan2_bus.registerDevice(&tail_claw_move_motor);
+  fdcan2_bus.registerDevice(&tail_claw_roll_motor);
+
+  fdcan1_bus.registerDevice(&lift_2006_motor1);
+  fdcan1_bus.registerDevice(&lift_2006_motor2);
+  fdcan1_bus.registerDevice(&lift_3508_motor1);
+  fdcan1_bus.registerDevice(&lift_3508_motor2);
+  
 
   // 串口外设
    uart2_rx_semphore = osSemaphoreNew(1, 0, NULL);
@@ -211,9 +238,22 @@ void onUsbRxCb(const uint8_t *data, size_t len, void *user) {
 //can发送任务
 void can1SendTask(void *argument) {
   TickType_t currentTime = xTaskGetTickCount();
+  CanBus::ClassicPack pack;
+  pack.type = CanBus::Type::STANDARD;
+  uint8_t len = 8;  
+  const uint32_t lift_motor_ids[4] = {0x201, 0x202, 0x203, 0x204};
 
   for (;;) {
+    // 一帧固定打包 4 个槽位：0x201~0x204
+    pack.id = 0x200; // DJI Group 2
 
+    int16_t commands[4] = {0};
+    commands[0] = static_cast<int16_t>(lift_2006_motor1.cmdTrans()); // 0x201
+    commands[1] = static_cast<int16_t>(lift_2006_motor2.cmdTrans()); // 0x202
+    commands[2] = static_cast<int16_t>(lift_3508_motor1.cmdTrans()); // 0x203
+    commands[3] = static_cast<int16_t>(lift_3508_motor2.cmdTrans()); // 0x204
+    packDJIMotorCanMsg(pack.id,lift_motor_ids, commands, 4, pack.data, len);
+    fdcan1_bus.addCanMsg(pack);
     vTaskDelayUntil(&currentTime, 1); // 每1ms执行一次发送任务
   }
 }
@@ -224,19 +264,21 @@ void can2SendTask(void *argument) {
   pack.type = CanBus::Type::STANDARD;
 
   uint8_t len = 8;
-  const uint32_t arm_motor_ids[4] = {0x205, 0x206, 0x207, 0x208};
+  const uint32_t arm_motor_ids[4] = {0x201, 0x202, 0x203, 0x204};
   for (;;) {
-    pack.id = 0x1FF; // DJI Group 2
+    pack.id = 0x200; // DJI Group 2
     // 当前仅有 0x201(arm2006) 和 0x203(arm3508)，其余槽位置 0
     int16_t commands[4] = {0};
 
     // arm motor
-    commands[0] = static_cast<int16_t>(arm2006_motor.cmdTrans()); // 0x201
-    commands[1] = static_cast<int16_t>(arm3508_motor.cmdTrans()); // 0x203
-    commands[2] = static_cast<int16_t>(0); // 0x203
-    commands[3] = static_cast<int16_t>(0); // 0x204
+    //commands[0] = static_cast<int16_t>(arm2006_motor.cmdTrans()); // 0x205
+    //commands[1] = static_cast<int16_t>(arm3508_motor.cmdTrans()); // 0x206
+    commands[0] = static_cast<int16_t>(tail_claw_move_motor.cmdTrans()); // 0x201
+    commands[1] = static_cast<int16_t>(tail_claw_roll_motor.cmdTrans()); // 0x202
+    commands[2] = static_cast<int16_t>(0);
+    commands[3] = static_cast<int16_t>(0);
     packDJIMotorCanMsg(pack.id, arm_motor_ids, commands, 4, pack.data, len);
-    // fdcan2_bus.addCanMsg(pack);
+     fdcan2_bus.addCanMsg(pack);
 
     vTaskDelayUntil(&currentTime, 1); // 每1ms执行一次发送任务
   }

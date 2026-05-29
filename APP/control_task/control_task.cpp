@@ -28,13 +28,16 @@ osThreadId_t ControlTaskHandle;
 TypedTopicPublisher<pub_chassis_cmd> chassis_data_pub("chassis_cmd");
 pub_chassis_cmd chassis_cmd{};
 
+TypedTopicPublisher<pub_lift_cmd> lift_data_pub("lift_cmd");
+pub_lift_cmd lift_cmd{};
+
 static TypedTopicSubscriber<pub_Xbox_Data> control_xbox_sub("xbox", 8);
 pub_Xbox_Data control_xbox_cmd{};
 
 static bool xbox_mode_last = false;
 static bool xbox_lb_last = false;
 static bool xbox_rb_last = false;
-
+//处理底盘控制输入并发布底盘指令
 void Xbox_Data_Process() {
   if (ABS(control_xbox_cmd.joyLVert - 32767) > 2000) {
     chassis_cmd.linear_x_ =
@@ -57,6 +60,19 @@ void Xbox_Data_Process() {
     chassis_cmd.omega_ = 0.0f;
   }
 }
+//处理升降控制输入并发布升降指令
+void Lift_Data_Process(){
+    lift_cmd.lift_up = control_xbox_cmd.btnY;
+    lift_cmd.lift_down = control_xbox_cmd.btnA;
+
+  if(ABS(control_xbox_cmd.joyRVert - 32767) > 2000){
+    lift_cmd.lift_2006_input = (int)(control_xbox_cmd.joyRVert - 32767) / 32767.0f * MAX_LIFT_VELOCITY;
+  } else {
+    lift_cmd.lift_2006_input = 0.0f;
+  }
+}
+  
+
 
 static bool consumeModeSwitch(bool current_state) {
   const bool rising_edge = current_state && !xbox_mode_last;
@@ -77,6 +93,9 @@ void controlInit() {
   if (!control_xbox_sub.IsValid()) {
     return;
   }
+  if (!lift_data_pub.IsValid()) {
+  return;
+}
 }
 
 void controlTask(void *argument) {
@@ -115,6 +134,8 @@ void controlTask(void *argument) {
           chassis_cmd.linear_y_ = 0.0f;
           chassis_cmd.omega_ = 0.0f;
         }
+        Lift_Data_Process();
+        lift_data_pub.Publish(lift_cmd);
         chassis_cmd.nav_mode_ = false;
         chassis_data_pub.Publish(chassis_cmd);
       }

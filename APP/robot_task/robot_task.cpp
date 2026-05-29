@@ -25,7 +25,8 @@
 #include "control_task.h"
 #include "debug_task.h"
 #include "NavProtocol.hpp"
-
+#include "lift_task.h"
+#include "tail_claw_task.hpp"
 /* module层接口头文件 */
 
 /* Definitions for TaskHand */
@@ -38,7 +39,9 @@ extern osThreadId_t Debug_TaskHandle;
 extern osThreadId_t ChassisTaskHandle;
 extern osThreadId_t ControlTaskHandle;
 extern osThreadId_t usbcdcProcessTaskHandle;
-
+extern osThreadId_t tail_claw_TaskHandle;
+extern osThreadId_t NavControlTaskHandle;
+extern osThreadId_t LiftTaskHandle;
 
 
 void osTaskInit(void) {
@@ -112,6 +115,15 @@ void osTaskInit(void) {
   };
   usbcdcProcessTaskHandle =
       osThreadNew(usbCdcProcessTask, NULL, &UsbcdcProcessTaskHandle_attributes);
+
+  const osThreadAttr_t tail_claw_TaskHandle_attributes = {
+      .name = "tail_claw_TaskHandle",
+      .stack_size = 128 * 4,
+      .priority = (osPriority_t)osPriorityNormal1,
+  };
+  tail_claw_TaskHandle =
+      osThreadNew(tail_claw_task, NULL, &tail_claw_TaskHandle_attributes);
+
 //用于定位
   const osThreadAttr_t NavControlTaskHandle_attributes = {
       .name = "NavControl_TaskHandle",
@@ -120,4 +132,12 @@ void osTaskInit(void) {
   };
   NavControlTaskHandle =
       osThreadNew(NavControlTask, NULL, &NavControlTaskHandle_attributes);
+//用于抬升
+  const osThreadAttr_t LiftTaskHandle_attributes = {
+      .name = "Lift_TaskHandle",
+      .stack_size = 512 * 4,
+      .priority = (osPriority_t)osPriorityNormal,
+  };
+  LiftTaskHandle =
+      osThreadNew(liftTask, NULL, &LiftTaskHandle_attributes);
 }
