@@ -5,9 +5,12 @@
  * @date 2026-05-24
  */
 
-#include "state_machine_task.h"
 #include "cmsis_os2.h"
 #include <atomic>
+#include <cstdint>
+
+#include "state_machine_task.h"
+#include "NavProtocol.hpp"
 osThreadId_t StateMachineTaskHandle;
 
 static std::atomic<RobotState> current_state{RobotState::begin};
@@ -75,4 +78,18 @@ bool wait_until_timeout_or(T &&condition, uint32_t timeout_ms, uint32_t delay_ms
 
 void change_state_to(RobotState new_state) {
     current_state.store(new_state);
+}
+
+// 这个函数必须在任务环境里调用
+void move_to_pos(int16_t x, int16_t y, int16_t yaw) {
+    taskENTER_CRITICAL();
+    nav_control::target_x = x;
+    nav_control::target_y = y;
+    nav_control::target_yaw = yaw;
+    nav_control::arrived = false;
+    taskEXIT_CRITICAL();
+    wait_until([&]() { return nav_control::arrived; });
+}
+void move_to_pos(const KeyPosition &pos) {
+    move_to_pos(pos.x, pos.y, pos.yaw);
 }
