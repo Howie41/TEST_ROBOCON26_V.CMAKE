@@ -34,6 +34,7 @@
 #include "topics.hpp"
 #include "topic_pool.h"
 #include "usart.h"
+#include "motor_task.hpp"
 #include <cstddef>
 #include <cstdio>
 #include <cstdint>
@@ -97,14 +98,12 @@ extern DMA_HandleTypeDef hdma_usart6_rx;
 
 DMA_BUFFER_ATTR static uint8_t uart3_rx_dma[64];
 DMA_BUFFER_ATTR static uint8_t uart3_tx_dma[64];
-UartPort uart3_port(&huart3, uart3_rx_dma, sizeof(uart3_rx_dma), uart3_tx_dma,
-                    sizeof(uart3_tx_dma), onUart3RxCb, nullptr);
+UartPort uart3_port(&huart3, uart3_rx_dma, sizeof(uart3_rx_dma), uart3_tx_dma, sizeof(uart3_tx_dma), onUart3RxCb, nullptr);
 osSemaphoreId_t uart3_rx_semphore = NULL;
 
 DMA_BUFFER_ATTR static uint8_t uart2_rx_dma[64];
 DMA_BUFFER_ATTR static uint8_t uart2_tx_dma[64];
-UartPort uart2_port(&huart2, uart2_rx_dma, sizeof(uart2_rx_dma), uart2_tx_dma,
-                    sizeof(uart2_tx_dma), onUart2RxCb, nullptr);
+UartPort uart2_port(&huart2, uart2_rx_dma, sizeof(uart2_rx_dma), uart2_tx_dma, sizeof(uart2_tx_dma), onUart2RxCb, nullptr);
 osSemaphoreId_t uart2_rx_semphore = NULL;
 
  // USART6 红外模块
@@ -123,12 +122,10 @@ UartPort uart10_port(&huart10, uart10_rx_dma, sizeof(uart10_rx_dma),
 XboxRemote xbox_remote(uart3_port);
 TypedTopicPublisher<pub_Xbox_Data> xbox_data_pub("xbox");
 pub_Xbox_Data xbox_msg;
+
 // HWT101 陀螺仪
 volatile float g_hwt101_yaw_deg = 0.0f;
-//volatile float g_hwt101_pitch_deg = 0.0f;
-//volatile float g_hwt101_roll_deg = 0.0f;
-//同样 需要roll和pitch再开启
-volatile uint32_t g_hwt101_frame_count = 0;
+volatile uint32_t g_hwt101_frame_count = 0;  //同样 需要roll和pitch再开启
 Hwt101Parser hwt101_parser;
 
 // 导航协议解析器
@@ -144,27 +141,34 @@ ROSProtocol ros_protocol(nullptr, &UsbPort::Instance());
 
 //上下位机通信
 PcCom pc_com(UsbPort::Instance());
+// Motor速度规划相关
+MotorPlanningSystem motor_planning_system;
+
+
+/** @brief 通信系统初始化函数，负责初始化can设备、串口设备、协议解析器等
+ *  @return 初始化结果，0表示成功，非0表示失败
+ */
 uint8_t comServiceInit() {
-  // can外设初始化
-  canFilterInit(&hfdcan1, FDCAN_STANDARD_ID, FDCAN_FILTER_TO_RXFIFO0, 0, 0);
-  canFilterInit(&hfdcan1, FDCAN_STANDARD_ID, FDCAN_FILTER_TO_RXFIFO1, 0, 0);
-  bspCanInit(&hfdcan1);
-  canFilterInit(&hfdcan2, FDCAN_STANDARD_ID, FDCAN_FILTER_TO_RXFIFO0, 0, 0);
-  canFilterInit(&hfdcan2, FDCAN_STANDARD_ID, FDCAN_FILTER_TO_RXFIFO1, 0, 0);
-  bspCanInit(&hfdcan2);
-  canFilterInit(&hfdcan3, FDCAN_STANDARD_ID, FDCAN_FILTER_TO_RXFIFO0, 0, 0);
-  canFilterInit(&hfdcan3, FDCAN_STANDARD_ID, FDCAN_FILTER_TO_RXFIFO1, 0, 0);
-  bspCanInit(&hfdcan3);
+    // can外设初始化
+    canFilterInit(&hfdcan1, FDCAN_STANDARD_ID, FDCAN_FILTER_TO_RXFIFO0, 0, 0);
+    canFilterInit(&hfdcan1, FDCAN_STANDARD_ID, FDCAN_FILTER_TO_RXFIFO1, 0, 0);
+    bspCanInit(&hfdcan1);
+    canFilterInit(&hfdcan2, FDCAN_STANDARD_ID, FDCAN_FILTER_TO_RXFIFO0, 0, 0);
+    canFilterInit(&hfdcan2, FDCAN_STANDARD_ID, FDCAN_FILTER_TO_RXFIFO1, 0, 0);
+    bspCanInit(&hfdcan2);
+    canFilterInit(&hfdcan3, FDCAN_STANDARD_ID, FDCAN_FILTER_TO_RXFIFO0, 0, 0);
+    canFilterInit(&hfdcan3, FDCAN_STANDARD_ID, FDCAN_FILTER_TO_RXFIFO1, 0, 0);
+    bspCanInit(&hfdcan3);
 
-  // can 总线初始化
-  fdcan1_bus.init();
-  fdcan2_bus.init();
-  fdcan3_bus.init();
+    // can 总线初始化
+    fdcan1_bus.init();
+    fdcan2_bus.init();
+    fdcan3_bus.init();
 
-  chassis_motor1.init();
-  chassis_motor2.init();
-  chassis_motor3.init();
-  chassis_motor4.init();
+    chassis_motor1.init();
+    chassis_motor2.init();
+    chassis_motor3.init();
+    chassis_motor4.init();
 
   arm2006_motor.init();
   arm3508_motor.init(100, 20000.0f);  // 减速比 P100
@@ -186,10 +190,10 @@ uint8_t comServiceInit() {
   fdcan3_bus.registerDevice(&chassis_motor4);
 
 
-  fdcan2_bus.registerDevice(&arm2006_motor);
-  fdcan2_bus.registerDevice(&arm3508_motor);
-  fdcan2_bus.registerDevice(&arm4310_motor);
-  fdcan2_bus.registerDevice(&arm4340_motor);
+    fdcan2_bus.registerDevice(&arm2006_motor);
+    fdcan2_bus.registerDevice(&arm3508_motor);
+    fdcan2_bus.registerDevice(&arm4310_motor);
+    fdcan2_bus.registerDevice(&arm4340_motor);
 
   //注册尾部电机
   fdcan2_bus.registerDevice(&tail_claw_move_motor);
@@ -216,11 +220,16 @@ uint8_t comServiceInit() {
   // Xbox控制器初始化
   xbox_remote.init();
 
-  // usb 外设
-  usbcdc_rx_semphore = osSemaphoreNew(1, 0, NULL);
-  ros_protocol.init();
-  UsbPort::Instance().SetRxCallback(onUsbRxCb, NULL);
-  return 0;
+    // usb 外设
+    usbcdc_rx_semphore = osSemaphoreNew(1, 0, NULL);
+    ros_protocol.init();
+    UsbPort::Instance().SetRxCallback(onUsbRxCb, NULL);
+
+    // Motor速度规划系统注册电机
+    motor_planning_system.registerMotor(arm3508_motor);
+    motor_planning_system.registerMotor(arm2006_motor);
+
+    return 0;
 }
 
 
