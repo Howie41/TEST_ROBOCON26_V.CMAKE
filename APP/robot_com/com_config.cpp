@@ -79,12 +79,6 @@ C610Motor tail_claw_move_motor(&fdcan2_bus, 0x201, 0, 0x200, 0);
 C620Motor tail_claw_roll_motor(&fdcan2_bus, 0x202, 0, 0x200, 0);
 
 
-//抬升电机
-C610Motor lift_2006_motor1(&fdcan1_bus, 0x201, 0, 0x200, 0);
-C610Motor lift_2006_motor2(&fdcan1_bus, 0x202, 0, 0x200, 0);
-C620Motor lift_3508_motor1(&fdcan1_bus, 0x203, 0, 0x200, 0);
-C620Motor lift_3508_motor2(&fdcan1_bus, 0x204, 0, 0x200, 0);
-
 // 串口外设（回调+信号量唤醒处理线程进行解包）
 void onUart3RxCb(const uint8_t *data, size_t len, void *user);
 void onUart2RxCb(const uint8_t *data, size_t len, void *user);
@@ -192,12 +186,6 @@ uint8_t comServiceInit() {
   //注册尾部电机
   fdcan2_bus.registerDevice(&tail_claw_move_motor);
   fdcan2_bus.registerDevice(&tail_claw_roll_motor);
-
-  fdcan1_bus.registerDevice(&lift_2006_motor1);
-  fdcan1_bus.registerDevice(&lift_2006_motor2);
-  fdcan1_bus.registerDevice(&lift_3508_motor1);
-  fdcan1_bus.registerDevice(&lift_3508_motor2);
-  
 
   fdcan1_bus.registerDevice(&lift_2006_motor1);
   fdcan1_bus.registerDevice(&lift_2006_motor2);

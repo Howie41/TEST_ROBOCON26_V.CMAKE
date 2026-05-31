@@ -42,30 +42,7 @@ PID_t pid_yaw = {
     .Improve = Integral_Limit,
 };
 
-// Phase 2: 高位2006导航 — 距离→速度PID
-PID_t pid_high_distance = {
-    .Kp = 8.0f,
-    .Ki = 0.05f,
-    .Kd = 0.0f,
-    .MaxOut = 500.0f,
-    .IntegralLimit = 200.0f,
-    .DeadBand = 5.0f,
-    .Improve = Integral_Limit,
-};
-
-// Phase 2: 高位2006导航 — yaw锁角PID (输出2006 RPM)
-PID_t pid_high_yaw = {
-    .Kp = 15.0f,
-    .Ki = 0.02f,
-    .Kd = 0.0f,
-    .MaxOut = 300.0f,
-    .IntegralLimit = 150.0f,
-    .DeadBand = 0.5f,
-    .Improve = Integral_Limit,
-};
-
 static TypedTopicPublisher<pub_chassis_cmd> chassis_cmd_pub("chassis_cmd");
-static TypedTopicPublisher<pub_high_nav_cmd> high_nav_pub("high_nav_cmd");
 
 namespace nav_control {
 int16_t current_x = 0;
@@ -78,7 +55,6 @@ bool auto_enabled = false;
 bool arrived = false;
 bool target_active = false;
 bool arrival_reported = false;
-bool high_mode_active = false;  // Phase 2: lift_task 自动管理
 }  // namespace nav_control
 
 namespace {
@@ -195,8 +171,6 @@ void NavProtocol::buildResponse(const NavCmd &cmd, char *buf, size_t buf_size) {
       PID_Init(&pid_x);
       PID_Init(&pid_y);
       PID_Init(&pid_yaw);
-      PID_Init(&pid_high_distance);
-      PID_Init(&pid_high_yaw);
       //snprintf(buf, buf_size, "TARGET OK X=%hd Y=%hd YAW=%hd\n",
                //nav_control::target_x, nav_control::target_y, nav_control::target_yaw);
       break;
@@ -242,8 +216,6 @@ void NavControlTask(void *argument) {
   PID_Init(&pid_x);
   PID_Init(&pid_y);
   PID_Init(&pid_yaw);
-  PID_Init(&pid_high_distance);
-  PID_Init(&pid_high_yaw);
 
   for (;;) {
     const TickType_t now = xTaskGetTickCount();
@@ -258,64 +230,13 @@ void NavControlTask(void *argument) {
         continue;
       }
 
-      // ===== Phase 2: 高位2006导航分支 =====
-      if (nav_control::high_mode_active) {
-        const float error_x = static_cast<float>(nav_control::target_x - nav_control::current_x);
-        const float error_y = static_cast<float>(nav_control::target_y - nav_control::current_y);
-        const float dist_error = sqrtf(error_x * error_x + error_y * error_y);
-
-        // 用现有车身坐标转换，得到目标在车体坐标系中的方向
-        const float yaw_rad =
-            static_cast<float>(nav_control::current_yaw) * 3.14159f / 180.0f;
-        const float error_x_body =  error_x * cosf(yaw_rad) + error_y * sinf(yaw_rad);
-        const float error_y_body = error_x * sinf(yaw_rad) - error_y * cosf(yaw_rad);
-
-        // 车体坐标系中，atan2(error_y_body, error_x_body) = 需要转多少角度才能对准目标
-        const float heading_error =
-            atan2f(error_y_body, error_x_body) * 180.0f / 3.14159f;
-
-        pub_high_nav_cmd high_cmd{};
-        high_cmd.active = true;
-
-        if (fabsf(heading_error) > 1.0f) {
-          // ROTATE: 原地旋转对准目标方向
-          high_cmd.forward_speed = 0.0f;
-          high_cmd.omega = PID_Calculate(&pid_high_yaw, 0.0f, heading_error);
-        } else {
-          // DRIVE: 直走 + yaw锁角
-          high_cmd.forward_speed =
-              PID_Calculate(&pid_high_distance, 0.0f, dist_error);
-          high_cmd.omega = PID_Calculate(&pid_high_yaw, 0.0f, heading_error);
-        }
-
-        // 限幅
-        if (high_cmd.forward_speed > 500.0f) high_cmd.forward_speed = 500.0f;
-        if (high_cmd.forward_speed < -500.0f) high_cmd.forward_speed = -500.0f;
-        if (high_cmd.omega > 500.0f) high_cmd.omega = 500.0f;
-        if (high_cmd.omega < -500.0f) high_cmd.omega = -500.0f;
-
-        const bool reached = (dist_error < 10.0f);
-        nav_control::arrived = reached;
-        if (reached) {
-          high_cmd.request_lower = true;
-          reportArrivalOnce();
-        } else {
-          nav_control::arrival_reported = false;
-        }
-
-        high_nav_pub.Publish(high_cmd);
-        vTaskDelayUntil(&lastWakeTime, 10);
-        continue;
-      }
-
-      // ===== 低位: 全向轮导航（现有逻辑） =====
       const float error_x = static_cast<float>(nav_control::target_x - nav_control::current_x);
       const float error_y = static_cast<float>(nav_control::target_y - nav_control::current_y);
       const float error_yaw = normalizeDeg(static_cast<float>(nav_control::target_yaw - nav_control::current_yaw));
 
       const float yaw_rad =
           static_cast<float>(nav_control::current_yaw) * 3.14159f / 180.0f;
-
+      
       // 坐标映射调整：
       // - 世界 X+ → 车体向前
       // - 世界 Y+ → 车体向左

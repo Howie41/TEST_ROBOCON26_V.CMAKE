@@ -24,7 +24,6 @@ extern bool auto_enabled;
 extern bool arrived;
 extern bool target_active;
 extern bool arrival_reported;
-extern bool high_mode_active;  // Phase 2: 高位2006着地，只能前进/后退+锁角
 
 }  // namespace nav_control
 
