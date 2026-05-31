@@ -72,7 +72,7 @@ typedef struct{
  float lift_2006_input;
 
  bool request_high;  //按一下Y 请求升高到高位
-bool request_low;   //按一下A 请求降低到低位
+ bool request_low;   //按一下A 请求降低到低位
 } pub_lift_cmd;
 
 typedef struct {
@@ -87,5 +87,9 @@ typedef struct {
   bool active;          // true=2006自动导航激活
   bool request_lower;   // 到达目标后请求降回低位
 } pub_high_nav_cmd;
+struct tail_claw_msg {
+   int16_t distance;
+};
+
 
 #pragma pack()

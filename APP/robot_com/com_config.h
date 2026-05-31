@@ -13,6 +13,8 @@
  */
 #pragma once
 
+#include "PCcom.hpp"
+#include "stm32h7xx_hal_pcd.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -35,6 +37,7 @@ void can3SendTask(void *argument);
 void uart2RxProcessTask(void *argument);
 void uart3RxProcessTask(void *argument);
 void usbCdcProcessTask(void *argument);
+void PcComTask(void *argument);
 
 #ifdef __cplusplus
 }

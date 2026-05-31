@@ -35,9 +35,9 @@
 #include "topic_pool.h"
 #include "usart.h"
 #include <cstddef>
+#include <cstdio>
 #include <cstdint>
 #include <cstring>
-
 
 osThreadId_t CAN1_Send_TaskHandle;
 osThreadId_t CAN2_Send_TaskHandle;
@@ -45,6 +45,7 @@ osThreadId_t CAN3_Send_TaskHandle;
 osThreadId_t uart2ProcessTaskHandle;
 osThreadId_t uart3ProcessTaskHandle;
 osThreadId_t usbcdcProcessTaskHandle;
+osThreadId_t PcComTaskHandle;
 
 extern FDCAN_HandleTypeDef hfdcan1;
 extern FDCAN_HandleTypeDef hfdcan2;
@@ -65,8 +66,18 @@ C620Motor chassis_motor4(&fdcan3_bus, 0x204, 0, 0x200, 0);
 //
 C610Motor arm2006_motor(&fdcan2_bus, 0x205, 0, 0x1FF, 0);
 C620Motor arm3508_motor(&fdcan2_bus, 0x206, 0, 0x1FF, 0);
-DM43xxMotor arm4310_motor(&fdcan2_bus, 0x301, 0, 0x01, 0,
-                         DM43xxMotor::PosWithSpeed);
+//DM43xxMotor arm4310_motor(&fdcan2_bus, 0x301, 0, 0x01, 0,DM43xxMotor::PosWithSpeed);
+
+//抬升电机
+C610Motor lift_2006_motor1(&fdcan1_bus, 0x201, 0, 0x200, 0);
+C610Motor lift_2006_motor2(&fdcan1_bus, 0x202, 0, 0x200, 0);
+C620Motor lift_3508_motor1(&fdcan1_bus, 0x203, 0, 0x200, 0);
+C620Motor lift_3508_motor2(&fdcan1_bus, 0x204, 0, 0x200, 0);
+
+//尾部的电机
+C610Motor tail_claw_move_motor(&fdcan2_bus, 0x201, 0, 0x200, 0);
+C620Motor tail_claw_roll_motor(&fdcan2_bus, 0x202, 0, 0x200, 0);
+
 
 //抬升电机
 C610Motor lift_2006_motor1(&fdcan1_bus, 0x201, 0, 0x200, 0);
@@ -133,6 +144,8 @@ Logger logger(uart10_port);
 osSemaphoreId_t usbcdc_rx_semphore = NULL;
 ROSProtocol ros_protocol(nullptr, &UsbPort::Instance());
 
+//上下位机通信
+PcCom pc_com(UsbPort::Instance());
 uint8_t comServiceInit() {
   // can外设初始化
   canFilterInit(&hfdcan1, FDCAN_STANDARD_ID, FDCAN_FILTER_TO_RXFIFO0, 0, 0);
@@ -157,7 +170,11 @@ uint8_t comServiceInit() {
 
   arm2006_motor.init();
   arm3508_motor.init();
-  arm4310_motor.init();
+
+//尾部电机的初始化
+  tail_claw_move_motor.init();
+  tail_claw_roll_motor.init();
+  
   lift_2006_motor1.init();
   lift_2006_motor2.init();
   lift_3508_motor1.init();
@@ -171,7 +188,16 @@ uint8_t comServiceInit() {
 
   fdcan2_bus.registerDevice(&arm2006_motor);
   fdcan2_bus.registerDevice(&arm3508_motor);
-  fdcan2_bus.registerDevice(&arm4310_motor);
+  //fdcan2_bus.registerDevice(&arm4310_motor);
+  //注册尾部电机
+  fdcan2_bus.registerDevice(&tail_claw_move_motor);
+  fdcan2_bus.registerDevice(&tail_claw_roll_motor);
+
+  fdcan1_bus.registerDevice(&lift_2006_motor1);
+  fdcan1_bus.registerDevice(&lift_2006_motor2);
+  fdcan1_bus.registerDevice(&lift_3508_motor1);
+  fdcan1_bus.registerDevice(&lift_3508_motor2);
+  
 
   fdcan1_bus.registerDevice(&lift_2006_motor1);
   fdcan1_bus.registerDevice(&lift_2006_motor2);
@@ -253,19 +279,21 @@ void can2SendTask(void *argument) {
   pack.type = CanBus::Type::STANDARD;
 
   uint8_t len = 8;
-  const uint32_t arm_motor_ids[4] = {0x205, 0x206, 0x207, 0x208};
+  const uint32_t arm_motor_ids[4] = {0x201, 0x202, 0x203, 0x204};
   for (;;) {
-    pack.id = 0x1FF; // DJI Group 2
+    pack.id = 0x200; // DJI Group 2
     // 当前仅有 0x201(arm2006) 和 0x203(arm3508)，其余槽位置 0
     int16_t commands[4] = {0};
 
     // arm motor
-    commands[0] = static_cast<int16_t>(arm2006_motor.cmdTrans()); // 0x201
-    commands[1] = static_cast<int16_t>(arm3508_motor.cmdTrans()); // 0x203
-    commands[2] = static_cast<int16_t>(0); // 0x203
-    commands[3] = static_cast<int16_t>(0); // 0x204
+    //commands[0] = static_cast<int16_t>(arm2006_motor.cmdTrans()); // 0x205
+    //commands[1] = static_cast<int16_t>(arm3508_motor.cmdTrans()); // 0x206
+    commands[0] = static_cast<int16_t>(tail_claw_move_motor.cmdTrans()); // 0x201
+    commands[1] = static_cast<int16_t>(tail_claw_roll_motor.cmdTrans()); // 0x202
+    commands[2] = static_cast<int16_t>(0);
+    commands[3] = static_cast<int16_t>(0);
     packDJIMotorCanMsg(pack.id, arm_motor_ids, commands, 4, pack.data, len);
-    // fdcan2_bus.addCanMsg(pack);
+     fdcan2_bus.addCanMsg(pack);
 
     vTaskDelayUntil(&currentTime, 1); // 每1ms执行一次发送任务
   }
@@ -299,9 +327,20 @@ void can3SendTask(void *argument) {
 
 //接收并处理任务
 void uart2RxProcessTask(void *argument){
-(void)argument;
+  (void)argument;
+  //测试与小电脑的通信，大家可以参考怎么订阅
+  /*TickType_t currentTime = xTaskGetTickCount();
+  for (;;) {
 
-for (;;) {
+  static TypedTopicSubscriber<tail_claw_msg> tail_claw_subscriber("pc_tail_claw_pub",8);
+   tail_claw_msg msg;
+  if(tail_claw_subscriber.TryGet(&msg))
+  {
+    char buf[32];
+    int len = snprintf(buf, sizeof(buf), "distance=%u\r\n", msg.distance);
+    uart2_port.write(reinterpret_cast<const uint8_t *>(buf), len, 100);
+  }
+  vTaskDelayUntil(&currentTime, 2);*/
   (void)osSemaphoreAcquire(uart2_rx_semphore, osWaitForever);
 
    UartPort::Packet packet{};
@@ -316,7 +355,7 @@ for (;;) {
       }
     }
 }
-}
+
 
 void uart3RxProcessTask(void *argument) {
   (void)argument;
@@ -364,7 +403,7 @@ void uart3RxProcessTask(void *argument) {
 }
 
 
-
+/*
 void usbCdcProcessTask(void *argument) {
     (void)argument;
 
@@ -387,7 +426,23 @@ void usbCdcProcessTask(void *argument) {
         }
     }
 }
+*/
 
+// 下面是协议解析和校验算法的实现，基于之前的设计
+void PcComTask(void *argument) {
+  (void)argument;
+  pc_com.init();
+
+  TickType_t currentTime = xTaskGetTickCount();
+
+  for (;;) {
+    osSemaphoreAcquire(usbcdc_rx_semphore, 1);
+    pc_com.ProcessRx();
+    
+    pc_com.ProcessTx();
+    vTaskDelayUntil(&currentTime, 1);
+  }
+}
 /*
 // ============ 原来的ROSProtocol方式（保留备用） ============
 void usbCdcProcessTask_Origin(void *argument) {

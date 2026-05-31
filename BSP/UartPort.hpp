@@ -22,15 +22,17 @@
 
 class UartPort {
 public:
+//每小块最多64字节，深度为8
   static constexpr size_t kPacketPayloadSize = 64;
   static constexpr size_t kRxQueueDepth = 8;
 
+  //定义一段数据
   struct Packet {
     uint16_t len{0};
     uint8_t data[kPacketPayloadSize]{};
   };
 
-  // 自定义回调
+  // 自定义回调，在收到数据的时候触发
   using RxCallback = void (*)(const uint8_t *data, size_t len, void *user);
 
   /**

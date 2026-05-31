@@ -25,6 +25,7 @@
 #include "com_config.h"
 #include "pid_controller.h"
 #include "pm20s.hpp"
+#include "tail_claw_task.hpp"
 
 #include <cmath>
 #include <cstdint>
