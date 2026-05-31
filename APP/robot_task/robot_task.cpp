@@ -41,7 +41,8 @@ extern osThreadId_t ControlTaskHandle;
 extern osThreadId_t usbcdcProcessTaskHandle;
 extern osThreadId_t tail_claw_TaskHandle;
 extern osThreadId_t NavControlTaskHandle;
-extern osThreadId_t LiftTaskHandle;extern osThreadId_t PcComTaskHandle;
+extern osThreadId_t LiftTaskHandle;
+extern osThreadId_t PcComTaskHandle;
 
 
 void osTaskInit(void) {
