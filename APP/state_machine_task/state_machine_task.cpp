@@ -90,6 +90,3 @@ void move_to_pos(int16_t x, int16_t y, int16_t yaw) {
     taskEXIT_CRITICAL();
     wait_until([&]() { return nav_control::arrived; });
 }
-void move_to_pos(const KeyPosition &pos) {
-    move_to_pos(pos.x, pos.y, pos.yaw);
-}
