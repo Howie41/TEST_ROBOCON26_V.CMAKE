@@ -321,20 +321,9 @@ void can3SendTask(void *argument) {
 
 //接收并处理任务
 void uart2RxProcessTask(void *argument){
-  (void)argument;
-  //测试与小电脑的通信，大家可以参考怎么订阅
-  /*TickType_t currentTime = xTaskGetTickCount();
-  for (;;) {
+(void)argument;
 
-  static TypedTopicSubscriber<tail_claw_msg> tail_claw_subscriber("pc_tail_claw_pub",8);
-   tail_claw_msg msg;
-  if(tail_claw_subscriber.TryGet(&msg))
-  {
-    char buf[32];
-    int len = snprintf(buf, sizeof(buf), "distance=%u\r\n", msg.distance);
-    uart2_port.write(reinterpret_cast<const uint8_t *>(buf), len, 100);
-  }
-  vTaskDelayUntil(&currentTime, 2);*/
+for (;;) {
   (void)osSemaphoreAcquire(uart2_rx_semphore, osWaitForever);
 
    UartPort::Packet packet{};
@@ -349,7 +338,7 @@ void uart2RxProcessTask(void *argument){
       }
     }
 }
-
+}
 
 void uart3RxProcessTask(void *argument) {
   (void)argument;
