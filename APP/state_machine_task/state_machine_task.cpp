@@ -18,6 +18,7 @@ static std::atomic<RobotState> current_state{RobotState::begin};
 void stateMachineTask(void *argument) {
     for (;;) {
         switch (current_state.load()) {
+        #ifdef MATCH_CWTY /** ========== 崇武探幽 单项赛 ========== */
 
             case RobotState::begin:
                 break;
@@ -37,10 +38,16 @@ void stateMachineTask(void *argument) {
             case RobotState::wait_for_cmd:
                 break;
 
-            default:
-                // 不应该到达这里
+        #elif MATCH_JGCB /** ========== 九宫藏宝 单项赛 ========== */
+
+
+        #endif /** ============================================= */
+            
+            default: // 不应该到达这里
                 break;
+
         }
+
         osDelay(1);
     }
 }
