@@ -1,52 +1,87 @@
-# PCcom 小电脑通信使用说明
+# PCcom USB 小电脑通信说明书
 
-本文档说明当前工程中 `Module/PCcom` 的上/下位机通信协议、板端调用方式、小电脑发包格式，以及常见调试方法。
+本文说明当前工程中主控板通过 USB CDC 虚拟串口与小电脑通信的实现、使用方式、信息流，以及当前静态检查发现的问题。
 
 ## 1. 当前通信链路
 
-当前工程中 `PcCom` 在 `APP/robot_com/com_config.cpp` 中创建：
+当前小电脑通信对象在 `APP/robot_com/com_config.cpp` 中创建：
 
 ```cpp
 PcCom pc_com(UsbPort::Instance());
 ```
 
-因此当前小电脑与主控板通信走的是 **USB CDC 虚拟串口**。数据流如下：
+因此当前走的是 USB CDC 虚拟串口，不是 UART。
+
+接收方向的信息流：
 
 ```text
-小电脑 / PC
+小电脑
   -> USB CDC 虚拟串口
-  -> UsbPort 接收队列
+  -> USB_DEVICE/App/usbd_cdc_if.c 的 CDC_Receive_HS()
+  -> UsbPort_OnRxFromIsr()
+  -> UsbPort::OnRxFromIsr()
+  -> UsbPort 接收队列 rx_queue_
   -> PcComTask
   -> pc_com.ProcessRx()
-  -> packet_manager 解析协议包
+  -> gdut::packet_manager::receive()
   -> PcCom::OnPacket()
   -> 发布到 topic
+  -> 业务任务订阅并执行
 ```
 
-当前示例命令收到后会发布到 topic：
+发送方向的信息流：
 
-```cpp
-"pc_tail_claw_pub"
+```text
+业务任务
+  -> 发布到发送 topic
+  -> PcComTask
+  -> pc_com.ProcessTx()
+  -> PcCom::send()
+  -> gdut::data_packet 封包
+  -> gdut::packet_manager::send()
+  -> UsbPort::WriteAsync()
+  -> UsbPort 发送队列 tx_queue_
+  -> UsbPort::PumpTx()
+  -> CDC_Transmit_HS()
+  -> USB CDC
+  -> 小电脑
 ```
 
-如果板端需要把消息再转发到某个串口，例如 UART2，可以在任务中订阅这个 topic，然后调用 `uart2_port.write()`。
+## 2. 相关文件分工
 
-## 2. 初始化要求
+| 文件 | 作用 |
+| --- | --- |
+| `Module/PCcom/PCcom.hpp/.cpp` | 上下位机通信模块，负责协议封包、解包、命令分发和 topic 桥接 |
+| `Module/transfer_protocol/transfer_protocol.hpp` | 通用二进制帧协议，提供 `data_packet` 和 `packet_manager` |
+| `Module/transfer_protocol/verification_algorithm.hpp` | CRC16 校验算法 |
+| `BSP/UsbPort.hpp/.cpp` | USB CDC 的 C++ 封装，提供收发队列和异步发送 |
+| `USB_DEVICE/App/usbd_cdc_if.c` | STM32 USB CDC 回调入口 |
+| `APP/robot_com/com_config.cpp` | 创建 `pc_com`、初始化 USB 回调、启动 `PcComTask` |
+| `Module/topics/topics.hpp/.cpp` | 板内 publish/subscribe 消息总线 |
+| `APP/robot_task/topic_pool.h` | topic 消息结构体定义 |
 
-`PcComTask` 启动后必须先调用一次：
+## 3. 初始化要求
+
+`PcComTask` 中必须先调用：
 
 ```cpp
 pc_com.init();
 ```
 
-否则 `packet_manager` 的发送函数和接收回调不会被设置，协议包即使被读到，也不会进入 `PcCom::OnPacket()`。
+这个函数会给 `packet_manager` 注册两个回调：
 
-推荐结构：
+```cpp
+manager_.set_send_function(...);
+manager_.set_receive_function(...);
+```
+
+如果不调用 `init()`，收到 USB 数据后不会进入 `PcCom::OnPacket()`，发送时也不会真正写入 USB。
+
+当前 `PcComTask` 主循环如下：
 
 ```cpp
 void PcComTask(void *argument) {
   (void)argument;
-
   pc_com.init();
 
   TickType_t currentTime = xTaskGetTickCount();
@@ -60,102 +95,82 @@ void PcComTask(void *argument) {
 }
 ```
 
-USB 设备初始化建议只保留一次 `MX_USB_DEVICE_Init()`，不要在 `main.c` 和 `freertos.c` 中重复初始化。
+这里的逻辑是：USB 接收回调释放 `usbcdc_rx_semphore`，任务醒来后把 `UsbPort` 队列里的数据交给协议解析器；即使没有收到数据，也会每 1 ms 执行一次 `ProcessTx()` 检查是否有板端要发给小电脑的数据。
 
-## 3. 协议帧格式
+## 4. 协议帧格式
 
-协议定义在：
+协议定义在 `Module/transfer_protocol/transfer_protocol.hpp`。
 
-```text
-Module/transfer_protocol/transfer_protocol.hpp
-```
-
-完整数据帧格式：
+完整帧格式：
 
 ```text
 AA 55 | size_hi size_lo | code_hi code_lo | crc_hi crc_lo | body... | 55 AA
 ```
 
-字段说明：
-
-| 字段 | 长度 | 字节序 | 说明 |
+| 字段 | 长度 | 字节序 | 含义 |
 | --- | --- | --- | --- |
-| header | 2 字节 | 固定 | 包头，固定为 `AA 55` |
+| header | 2 字节 | 固定值 | 包头，固定为 `AA 55` |
 | size | 2 字节 | 大端 | 整包长度，包含 header、size、code、crc、body、tail |
 | code | 2 字节 | 大端 | 命令码 |
 | crc | 2 字节 | 大端 | CRC16 校验值 |
-| body | N 字节 | 按双方约定 | 数据体 |
-| tail | 2 字节 | 固定 | 包尾，固定为 `55 AA` |
+| body | N 字节 | 按结构体原始内存 | 数据体 |
+| tail | 2 字节 | 固定值 | 包尾，固定为 `55 AA` |
 
-最短空包长度是 10 字节：
-
-```text
-2 + 2 + 2 + 2 + 0 + 2 = 10
-```
-
-当前示例消息 `tail_claw_msg` 的 body 长度是 2 字节，所以整包长度是 12 字节：
+最短空包长度：
 
 ```text
-0x000C
+2 + 2 + 2 + 2 + 0 + 2 = 10 字节
 ```
 
-## 4. 当前已有命令
+当前示例消息 `tail_claw_msg` 的 body 是：
 
-命令码定义在：
-
-```text
-Module/PCcom/PCcom.hpp
+```cpp
+struct tail_claw_msg {
+  int16_t distance;
+};
 ```
 
-当前已有命令：
+所以它的整包长度是 12 字节。
+
+## 5. 当前命令码
+
+命令码定义在 `Module/PCcom/PCcom.hpp`：
 
 ```cpp
 enum class PcCmd : uint16_t {
   tail_claw_msg = 0x0001,
+  tail_claw_msg_flase = 0x0002,
+  tail_claw_msg_success = 0x0003,
 };
 ```
 
-对应消息结构体定义在：
+当前真正实现了解析和发送的只有：
 
 ```text
-APP/robot_task/topic_pool.h
+0x0001: tail_claw_msg
 ```
 
-当前结构体：
+`tail_claw_msg_flase` 和 `tail_claw_msg_success` 目前只是枚举值，还没有在 `OnPacket()` 或 `ProcessTx()` 中实现业务逻辑。
+
+## 6. CRC16 规则
+
+当前使用 `gdut::crc16_algorithm`：
 
 ```cpp
-struct tail_claw_msg {
-  uint16_t distance;
-};
+using Packet = gdut::data_packet<gdut::crc16_algorithm>;
+using Manager = gdut::packet_manager<gdut::crc16_algorithm>;
 ```
 
-注意：`body` 是直接 `memcpy` 到结构体里的原始字节。STM32 是小端机器，所以 `distance` 的 body 使用小端序。
-
-例如：
-
-```text
-distance = 100 = 0x0064
-body = 64 00
-```
-
-## 5. CRC16 算法
-
-当前使用：
-
-```cpp
-gdut::crc16_algorithm
-```
-
-参数：
+规则：
 
 ```text
 初始值: 0xFFFF
-多项式: 0xA001 反向形式
+查表算法等价于 CRC16/MODBUS 反向多项式 0xA001
 计算范围: 整包中除 crc 两个字节以外的所有字节
 写入顺序: crc 高字节在前，低字节在后
 ```
 
-也就是说计算 CRC 时参与的数据为：
+也就是参与计算的数据为：
 
 ```text
 header + size + code + body + tail
@@ -163,26 +178,26 @@ header + size + code + body + tail
 
 不包含 `crc_hi crc_lo` 本身。
 
-## 6. 小电脑发送示例
+## 7. 小电脑发包示例
 
-发送 `tail_claw_msg{ distance = 100 }`：
+发送 `tail_claw_msg{distance = 100}`：
 
 ```text
 AA 55 00 0C 00 01 29 C4 64 00 55 AA
 ```
 
-含义：
+解释：
 
 ```text
 AA 55      header
 00 0C      size = 12
 00 01      code = tail_claw_msg
 29 C4      crc16
-64 00      body: distance = 100
+64 00      body，int16_t distance = 100，小端
 55 AA      tail
 ```
 
-Python 发送示例：
+Python 示例：
 
 ```python
 import serial
@@ -218,40 +233,36 @@ def build_packet(code: int, body: bytes) -> bytes:
 ser = serial.Serial("COM20", 115200, timeout=0.1)
 
 distance = 100
-body = distance.to_bytes(2, "little")
+body = int(distance).to_bytes(2, "little", signed=True)
 frame = build_packet(0x0001, body)
 
 print(frame.hex(" ").upper())
 ser.write(frame)
 ```
 
-输出应为：
+注意：USB CDC 虚拟串口里设置的波特率通常只是主机侧串口软件参数，对 USB 本身不决定真实传输速率；但串口助手仍然需要选对 COM 口。
 
-```text
-AA 55 00 0C 00 01 29 C4 64 00 55 AA
-```
+## 8. 串口助手测试方法
 
-## 7. 使用串口助手 / VOFA 测试
+使用 VOFA 或普通串口助手时：
 
-如果使用 VOFA 或普通串口助手向 USB CDC 发送数据：
+1. 选择 STM32 枚举出的 USB 虚拟串口。
+2. 使用 HEX/十六进制发送。
+3. 不要用文本模式发送 `AA 55 00 ...`。
 
-1. 选择 STM32 的 USB 虚拟串口。
-2. 必须使用 **HEX / 十六进制发送**。
-3. 不要用文本模式发送 `AA 55 00 ...`，否则板子收到的是 ASCII 字符，而不是二进制字节。
-
-错误示例：
+错误方式：
 
 ```text
 文本发送: "AA 55 00 0C ..."
 ```
 
-板子实际收到：
+板子实际收到的是 ASCII：
 
 ```text
 41 41 20 35 35 20 ...
 ```
 
-正确示例：
+正确方式：
 
 ```text
 HEX 发送: AA 55 00 0C 00 01 29 C4 64 00 55 AA
@@ -263,15 +274,23 @@ HEX 发送: AA 55 00 0C 00 01 29 C4 64 00 55 AA
 AA 55 00 0C 00 01 29 C4 64 00 55 AA
 ```
 
-## 8. 板端接收使用
+## 9. 板端接收使用方式
 
-当前 `PcCom::OnPacket()` 中收到 `tail_claw_msg` 后会发布：
+当前 `PcCom::OnPacket()` 收到 `tail_claw_msg` 后：
 
 ```cpp
+tail_claw_msg msg{};
+std::memcpy(&msg, packet.body_data(), sizeof(tail_claw_msg));
 pc_tail_claw_pub_.Publish(msg);
 ```
 
-业务任务中可以这样订阅：
+它会发布到 topic：
+
+```text
+pc_tail_claw_pub
+```
+
+业务任务订阅方式：
 
 ```cpp
 static TypedTopicSubscriber<tail_claw_msg> tail_claw_subscriber(
@@ -283,41 +302,23 @@ if (tail_claw_subscriber.TryGet(&msg)) {
 }
 ```
 
-如果只是想验证 UART2 输出，可以临时打印 ASCII：
-
-```cpp
-char buf[32];
-int len = snprintf(buf, sizeof(buf), "distance=%u\r\n", msg.distance);
-if (len > 0) {
-  uart2_port.write(reinterpret_cast<const uint8_t *>(buf),
-                   static_cast<size_t>(len), 100);
-}
-```
-
-UART2 当前配置为：
+当前 `APP/tail_claw_task/tail_claw_task.cpp` 已经这样订阅，并根据 `distance` 控制尾部横移方向：
 
 ```text
-115200, 8N1
-TX: PD5
-RX: PD6
+distance < -5: 左移
+distance >  5: 右移
+否则: 不横移
 ```
 
-接 USB-TTL 时：
+## 10. 板端发送给小电脑
+
+`PcCom::ProcessTx()` 当前订阅：
 
 ```text
-STM32 PD5 / USART2_TX -> USB-TTL RX
-STM32 GND             -> USB-TTL GND
+pc_tail_claw_sub
 ```
 
-## 9. 板端发送给小电脑
-
-`PcCom::ProcessTx()` 会订阅：
-
-```cpp
-"pc_tail_claw_sub"
-```
-
-如果某个任务想主动向小电脑发送 `tail_claw_msg`，可以发布：
+业务任务如果要主动发 `tail_claw_msg` 给小电脑，可以发布：
 
 ```cpp
 static TypedTopicPublisher<tail_claw_msg> tail_claw_pc_pub(
@@ -334,22 +335,24 @@ tail_claw_pc_pub.Publish(msg);
 pc_com.ProcessTx();
 ```
 
-会把消息封装成协议包并通过 USB 发给小电脑。
+会把它封装成协议包，通过 USB CDC 发给小电脑。
 
-## 10. 新增命令流程
+## 11. 新增命令流程
 
-新增一类小电脑消息时，通常需要改 3 个位置。
+新增一类小电脑消息通常需要改四处。
 
-第一步，在 `APP/robot_task/topic_pool.h` 中定义结构体：
+第一步，在 `APP/robot_task/topic_pool.h` 定义结构体：
 
 ```cpp
 struct my_msg {
-  uint16_t value;
+  int16_t value;
   uint8_t mode;
 };
 ```
 
-第二步，在 `Module/PCcom/PCcom.hpp` 中增加命令码：
+建议尽量使用固定宽度类型，例如 `uint8_t`、`int16_t`、`float`。如果协议要跨平台长期使用，不建议直接传带 `bool` 或隐式 padding 的结构体。
+
+第二步，在 `Module/PCcom/PCcom.hpp` 增加命令码：
 
 ```cpp
 enum class PcCmd : uint16_t {
@@ -358,7 +361,13 @@ enum class PcCmd : uint16_t {
 };
 ```
 
-第三步，在 `Module/PCcom/PCcom.cpp` 中增加解析逻辑：
+第三步，在 `PcCom` 中增加对应 publisher：
+
+```cpp
+TypedTopicPublisher<my_msg> my_msg_pub_{"pc_my_msg_pub"};
+```
+
+第四步，在 `Module/PCcom/PCcom.cpp` 的 `OnPacket()` 中增加解析：
 
 ```cpp
 case static_cast<uint16_t>(PcCmd::my_msg): {
@@ -373,57 +382,164 @@ case static_cast<uint16_t>(PcCmd::my_msg): {
 }
 ```
 
-如果还需要板端主动发送，也要在 `ProcessTx()` 中增加对应 topic 订阅和 `send()` 调用。
-
-## 11. 常见问题排查
-
-### 11.1 电脑看不到 USB 虚拟串口
-
-可能原因：
-
-1. 程序没有运行。
-2. 程序卡在 `MX_USB_DEVICE_Init()` 前。
-3. USB 初始化被重复调用。
-4. USB 线不是数据线。
-5. USB 时钟或硬件连接异常。
-
-### 11.2 USB 收到了，但协议不进 `OnPacket`
-
-重点检查：
-
-1. 是否 HEX 发送。
-2. `size` 是否是整包长度，不是 body 长度。
-3. `code` 是否正确。
-4. CRC 是否正确。
-5. `tail` 是否是 `55 AA`。
-6. `pc_com.init()` 是否已经调用。
-
-### 11.3 进了 `OnPacket`，但是业务没有反应
-
-重点检查：
-
-1. 是否订阅了正确 topic：`"pc_tail_claw_pub"`。
-2. `body_size()` 是否等于 `sizeof(tail_claw_msg)`。
-3. 业务任务是否在正常运行。
-4. 如果通过 UART2 验证，确认 UART2 接线和波特率。
-
-## 12. 当前示例快速测试
-
-小电脑发送：
-
-```text
-AA 55 00 0C 00 01 29 C4 64 00 55 AA
-```
-
-板端成功解析后：
+如果还需要板端主动发给小电脑，再在 `ProcessTx()` 中订阅发送 topic 并调用：
 
 ```cpp
-msg.distance == 100
+send(static_cast<uint16_t>(PcCmd::my_msg), msg);
 ```
 
-如果 `uart2RxProcessTask` 中使用 ASCII 打印，应在 UART2 看到：
+## 12. 常见问题排查
+
+### 12.1 小电脑看不到 USB 虚拟串口
+
+重点检查：
+
+1. USB 数据线是否支持数据传输。
+2. 程序是否卡在 `MX_USB_DEVICE_Init()` 或更早的位置。
+3. `MX_USB_DEVICE_Init()` 是否被重复调用。
+4. USB 时钟、GPIO、OTG HS/FS 配置是否正确。
+5. Windows 设备管理器是否枚举为 CDC 设备。
+
+### 12.2 UsbPort 收到了数据，但没有进入 OnPacket
+
+重点检查：
+
+1. 是否使用 HEX 发送。
+2. `size` 是否是整包长度，不是 body 长度。
+3. `code` 是否与 `PcCmd` 一致。
+4. CRC 是否按当前规则计算。
+5. 包尾是否是 `55 AA`。
+6. `pc_com.init()` 是否已经执行。
+
+### 12.3 进入 OnPacket，但业务没有动作
+
+重点检查：
+
+1. 业务任务是否订阅了正确 topic，例如 `pc_tail_claw_pub`。
+2. body 长度是否等于 `sizeof(对应结构体)`。
+3. 业务任务是否已经启动。
+4. topic 池容量是否够用。
+5. 消息是否被业务任务每周期清零或覆盖。
+
+## 13. 静态检查发现的问题和风险
+
+### 高风险 1：USB 初始化被调用了两次
+
+当前 `Core/Src/main.c` 中调用了一次：
+
+```cpp
+MX_USB_DEVICE_Init();
+```
+
+但 `Core/Src/freertos.c` 的 `StartDefaultTask()` 中又调用了一次：
+
+```cpp
+MX_USB_DEVICE_Init();
+```
+
+USB Device 通常不应该重复初始化。建议只保留一次。当前代码注释也写了希望放在 `main.c` 靠前位置，因此更建议删除或注释 `freertos.c` 里的那一次。
+
+### 高风险 2：RTOS 初始化顺序可疑
+
+当前 `main.c` 中先调用：
+
+```cpp
+Robot_Init();
+```
+
+`Robot_Init()` 内部会创建 semaphores 和 threads：
+
+```cpp
+comServiceInit();
+osTaskInit();
+```
+
+但 `osKernelInitialize()` 在 `Robot_Init()` 之后才调用。CMSIS-RTOS2 的推荐流程是：
 
 ```text
-distance=100
+osKernelInitialize()
+创建 RTOS 对象和线程
+osKernelStart()
 ```
+
+建议把 `Robot_Init()` 中依赖 RTOS 对象创建的部分放到 `osKernelInitialize()` 之后执行，或者把 `Robot_Init()` 拆成硬件初始化和 RTOS 对象初始化两段。
+
+### 高风险 3：USB 接收回调名字带 FromIsr，但调用了普通 osSemaphoreRelease
+
+`UsbPort::OnRxFromIsr()` 会调用 `onUsbRxCb()`，里面执行：
+
+```cpp
+osSemaphoreRelease(usbcdc_rx_semphore);
+```
+
+如果该回调确实处在 USB 中断上下文，使用 CMSIS 封装是否安全要结合当前 FreeRTOS/CMSIS 配置确认。更稳妥的方式是使用明确的 ISR-safe 通知机制，或者确认 `osSemaphoreRelease` 在当前移植层允许从 ISR 调用。
+
+### 中风险 4：UsbPort 发送状态变量有中断/任务并发风险
+
+`UsbPort::PumpTx()` 在任务里调用，`UsbPort::OnTxCpltFromIsr()` 在 USB 发送完成回调中调用。二者共享：
+
+```cpp
+tx_staging_
+tx_staging_valid_
+tx_inflight_
+```
+
+其中只有 `tx_inflight_` 是 `volatile bool`，不是原子量，也没有临界区保护。轻载下通常能跑，但在连续高频发送时可能出现状态竞争。建议用临界区或原子状态机保护发送状态。
+
+### 中风险 5：协议接收缓冲没有最大长度限制
+
+`packet_manager::receive()` 会持续向 `m_receive_buffer` 追加数据。如果小电脑发送了一个合法包头但 size 很大，且后续一直不补齐完整包，缓冲区可能持续增长。建议加最大包长限制，例如 256 或 512 字节，超过后丢弃并重新同步。
+
+### 中风险 6：直接 memcpy 结构体作为协议 body，可移植性较差
+
+当前 body 直接是 MCU 内存布局：
+
+```cpp
+std::memcpy(&msg, packet.body_data(), sizeof(tail_claw_msg));
+```
+
+这要求小电脑端完全遵守：
+
+```text
+字段类型一致
+大小端一致
+结构体 padding 一致
+float 格式一致
+bool 大小一致
+```
+
+当前 `tail_claw_msg` 只有一个 `int16_t`，问题不大；后续复杂结构体建议手动序列化每个字段。
+
+### 中风险 7：`PcCom` 里有一个未使用的成员订阅者
+
+`PCcom.hpp` 中定义了：
+
+```cpp
+TypedTopicSubscriber<tail_claw_msg> pc_tail_claw_sub_{"pc_tail_claw_sub",8};
+```
+
+但 `ProcessTx()` 里又定义了一个同 topic 的 static subscriber：
+
+```cpp
+static TypedTopicSubscriber<tail_claw_msg> tail_claw_subscriber(
+    "pc_tail_claw_sub", 8);
+```
+
+成员 `pc_tail_claw_sub_` 当前未使用，还会额外占用一个订阅者名额。建议删掉成员，或者改为在 `ProcessTx()` 使用这个成员。
+
+### 低风险 8：命名拼写错误
+
+`tail_claw_msg_flase` 应该是 `false`。如果后续小电脑协议也按这个名字生成代码，容易造成误解。
+
+### 低风险 9：当前说明和注释存在编码乱码
+
+多处中文注释显示为乱码，不影响编译，但会影响维护。建议统一保存为 UTF-8。
+
+## 14. 推荐整改优先级
+
+1. 先修 USB 重复初始化。
+2. 再理顺 `osKernelInitialize()`、RTOS 对象创建、`osKernelStart()` 的顺序。
+3. 给 `packet_manager` 增加最大包长保护。
+4. 清理 `PcCom` 中未使用的订阅者成员。
+5. 后续新增复杂消息时，改成显式序列化，而不是直接 memcpy 结构体。
 
