@@ -67,10 +67,14 @@ PID_t pid_high_yaw = {
 static TypedTopicPublisher<pub_chassis_cmd> chassis_cmd_pub("chassis_cmd");
 static TypedTopicPublisher<pub_high_nav_cmd> high_nav_pub("high_nav_cmd");
 
+// PcCom 导航事件发布者: 全局可见，lift_task 也可使用
+TypedTopicPublisher<pc_nav_event_t> pc_nav_event_pub("pc_nav_event_pub");
+
 namespace nav_control {
 int16_t current_x = 0;
 int16_t current_y = 0;
 int16_t current_yaw = 0;
+int16_t pc_reported_yaw = 0;
 int16_t target_x = 0;
 int16_t target_y = 0;
 int16_t target_yaw = 0;
@@ -78,18 +82,32 @@ bool auto_enabled = false;
 bool arrived = false;
 bool target_active = false;
 bool arrival_reported = false;
-bool high_mode_active = false;  // Phase 2: lift_task 自动管理
+bool high_mode_active = false;
+
+// 位置更新时间戳: PcCom 收到位置上报时刷新，NavControlTask 用于超时检测
+TickType_t g_last_position_update_tick = 0;
+
+void updatePositionTimestamp() {
+  g_last_position_update_tick = xTaskGetTickCount();
+}
+
+void resetAllPIDs() {
+  PID_Init(&pid_x);
+  PID_Init(&pid_y);
+  PID_Init(&pid_yaw);
+  PID_Init(&pid_high_distance);
+  PID_Init(&pid_high_yaw);
+}
+
 }  // namespace nav_control
 
 namespace {
 
 constexpr TickType_t kPositionTimeoutTicks = pdMS_TO_TICKS(200);
 
-TickType_t g_last_position_update_tick = 0;
-
 bool isPositionFresh(TickType_t now) {
-  return (g_last_position_update_tick != 0U) &&
-         ((now - g_last_position_update_tick) <= kPositionTimeoutTicks);
+  return (nav_control::g_last_position_update_tick != 0U) &&
+         ((now - nav_control::g_last_position_update_tick) <= kPositionTimeoutTicks);
 }
 
 float normalizeDeg(float angle_deg) {
@@ -113,10 +131,13 @@ void reportArrivalOnce() {
     return;
   }
 
-  static const uint8_t arrived_msg[] = "A\n";
-  if (UsbPort::Instance().WriteAsync(arrived_msg, sizeof(arrived_msg) - 1U)) {
-    nav_control::arrival_reported = true;
-  }
+  // 先设标志，防止重复发布
+  nav_control::arrival_reported = true;
+
+  // 发布到达事件到 PcCom topic → ProcessTx 用二进制协议发送
+  pc_nav_event_t evt{0x0201};
+  pc_nav_event_pub.Publish(evt);
+
 }
 
 }  // namespace
@@ -192,19 +213,13 @@ void NavProtocol::buildResponse(const NavCmd &cmd, char *buf, size_t buf_size) {
       nav_control::arrived = false;
       nav_control::target_active = true;
       nav_control::arrival_reported = false;
-      PID_Init(&pid_x);
-      PID_Init(&pid_y);
-      PID_Init(&pid_yaw);
-      PID_Init(&pid_high_distance);
-      PID_Init(&pid_high_yaw);
-      //snprintf(buf, buf_size, "TARGET OK X=%hd Y=%hd YAW=%hd\n",
-               //nav_control::target_x, nav_control::target_y, nav_control::target_yaw);
+      nav_control::resetAllPIDs();
       break;
 
     case CmdType::POSITION:
       nav_control::current_x = cmd.param1;
       nav_control::current_y = cmd.param2;
-      g_last_position_update_tick = now;
+      nav_control::g_last_position_update_tick = now;
       snprintf(buf, buf_size, "POS OK X=%hd Y=%hd\n",
                nav_control::current_x, nav_control::current_y);
       break;

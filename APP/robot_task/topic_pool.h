@@ -91,5 +91,25 @@ struct tail_claw_msg {
    int16_t distance;
 };
 
+// ===== PcCom 二进制导航协议结构体 =====
+
+// 上位机→下位机: 上报当前激光雷达坐标 (消息码 0x0101)
+typedef struct {
+  int16_t x;    // 世界坐标系 X (mm)
+  int16_t y;    // 世界坐标系 Y (mm)
+  int16_t yaw;  // 上位机计算的 yaw 角度 (度*100 或 度)，仅供记录，实际导航用陀螺仪
+} pc_nav_position_t;
+
+// 上位机→下位机: 下发目标点 (消息码 0x0102)
+typedef struct {
+  int16_t x;    // 目标 X (mm)
+  int16_t y;    // 目标 Y (mm)
+  int16_t yaw;  // 目标 yaw (度)
+} pc_nav_target_t;
+
+// 下位机→上位机: 事件通知 (消息码 0x0201~0x0205)
+typedef struct {
+  uint16_t event_code;  // 事件码，对应 PcCmd 中的 nav_* 枚举值
+} pc_nav_event_t;
 
 #pragma pack()

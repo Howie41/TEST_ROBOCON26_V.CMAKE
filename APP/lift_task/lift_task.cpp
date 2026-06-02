@@ -25,6 +25,9 @@ extern C610Motor lift_2006_motor2;
 extern C620Motor lift_3508_motor1;
 extern C620Motor lift_3508_motor2;
 
+// 引用 NavProtocol.cpp 中定义的全局导航事件发布者
+extern TypedTopicPublisher<pc_nav_event_t> pc_nav_event_pub;
+
 osThreadId_t LiftTaskHandle;
 
 static TypedTopicSubscriber<pub_lift_cmd> lift_cmd_sub("lift_cmd", 8);
@@ -271,8 +274,14 @@ void liftTask(void *argument) {
       nav_control::high_mode_active = true;
       high_yaw_lock_ref = g_chassis_yaw_deg;
       PID_Init(&high_yaw_lock_pid);
+      // 通知上位机: 进入高位模式
+      pc_nav_event_t evt{static_cast<uint16_t>(0x0202)};
+      pc_nav_event_pub.Publish(evt);
     } else if (!is_high && high_was_active) {
       nav_control::high_mode_active = false;
+      // 通知上位机: 退出高位模式
+      pc_nav_event_t evt{static_cast<uint16_t>(0x0203)};
+      pc_nav_event_pub.Publish(evt);
     }
     high_was_active = is_high;
 
